@@ -9,6 +9,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { AppTab } from '../types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface PageGlassHeaderProps {
   currentTab: 'reminders' | 'bookkeeping' | 'whatsapp';
@@ -152,6 +153,8 @@ export const PageGlassHeader: React.FC<PageGlassHeaderProps> = ({
               )}
             </button>
           )}
+
+          <PWAInstallButton />
         </div>
 
       </div>

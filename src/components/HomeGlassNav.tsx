@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { AppTab, ReminderTask, Transaction, ScheduledWhatsApp } from '../types';
 import { playNotificationChime } from '../utils/audio';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HomeGlassNavProps {
   activeTab: AppTab;
@@ -76,6 +77,7 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
 
           {/* Quick Utility Actions */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            <PWAInstallButton />
             <button
               type="button"
               onClick={onSimulateAlarm}
