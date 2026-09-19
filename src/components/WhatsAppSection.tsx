@@ -18,14 +18,10 @@ import {
   Check,
   Sparkles,
   AlertCircle,
-  Key,
   Zap,
-  ChevronDown,
-  ChevronUp,
   RefreshCw,
   Rocket,
-  Radio,
-  Settings2
+  Radio
 } from 'lucide-react';
 import { ScheduledWhatsApp, WhatsAppTextType } from '../types';
 import { 
@@ -33,10 +29,9 @@ import {
   sendScheduledWhatsApp, 
   WHATSAPP_TEXT_TEMPLATES 
 } from '../utils/whatsapp';
-import { FonnteSettingsCard, WhatsAppGatewaySettingsCard } from './FonnteSettingsCard';
 import { 
-  getGatewayStatus,
-  WhatsAppProvider 
+  getWhatsAppStatus,
+  WhatsAppState 
 } from '../utils/whatsappGateway';
 
 interface WhatsAppSectionProps {
@@ -47,7 +42,7 @@ interface WhatsAppSectionProps {
   onToggleStatus: (id: string) => void;
   onSendNow: (item: ScheduledWhatsApp) => void;
   onSendViaGateway?: (item: ScheduledWhatsApp) => Promise<{ success: boolean; message: string; provider?: string }>;
-  onSendViaFonnte?: (item: ScheduledWhatsApp) => Promise<{ success: boolean; message: string }>;
+  onOpenSettings?: () => void;
 }
 
 export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
@@ -58,17 +53,23 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
   onToggleStatus,
   onSendNow,
   onSendViaGateway,
-  onSendViaFonnte,
+  onOpenSettings,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'recurring' | 'sent'>('all');
   const [textTypeFilter, setTextTypeFilter] = useState<string>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Gateway Settings State (Bablast.id & Fonnte)
-  const [showGatewaySettings, setShowGatewaySettings] = useState(false);
-  const [hasGatewayKey, setHasGatewayKey] = useState(false);
-  const [activeProvider, setActiveProvider] = useState<WhatsAppProvider>('bablast');
+  // Self-Hosted WhatsApp Connection State
+  const [waState, setWaState] = useState<WhatsAppState>({
+    status: 'disconnected',
+    isConnected: false,
+    qrCode: null,
+    phoneNumber: null,
+    pushName: null,
+    lastConnectedAt: null,
+    lastError: null,
+  });
   const [sendingGatewayId, setSendingGatewayId] = useState<string | null>(null);
   const [gatewayFeedback, setGatewayFeedback] = useState<{
     id: string;
@@ -76,15 +77,19 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
     message: string;
   } | null>(null);
 
-  const refreshGatewayState = () => {
-    const status = getGatewayStatus();
-    setHasGatewayKey(status.hasActiveKey);
-    setActiveProvider(status.activeProvider);
+  const fetchStatus = async () => {
+    try {
+      const state = await getWhatsAppStatus();
+      setWaState(state);
+    } catch (err) {
+      // ignore
+    }
   };
 
-  // Check gateway status on mount
   useEffect(() => {
-    refreshGatewayState();
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   // Statistics calculation
@@ -129,13 +134,12 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
   };
 
   const handleSendGatewayDirect = async (item: ScheduledWhatsApp) => {
-    const sendFn = onSendViaGateway || onSendViaFonnte;
-    if (!sendFn) return;
+    if (!onSendViaGateway) return;
     setSendingGatewayId(item.id);
     setGatewayFeedback(null);
 
     try {
-      const res = await sendFn(item);
+      const res = await onSendViaGateway(item);
       setGatewayFeedback({
         id: item.id,
         success: res.success,
@@ -148,7 +152,7 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
       setGatewayFeedback({
         id: item.id,
         success: false,
-        message: err.message || 'Gagal mengirim pesan via Gateway WhatsApp.',
+        message: err.message || 'Gagal mengirim pesan via WhatsApp mandiri.',
       });
     } finally {
       setSendingGatewayId(null);
@@ -196,44 +200,33 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
             <span className="text-xs text-slate-400 font-medium">Auto-Format +62</span>
             
             {/* Gateway status chip */}
-            <span className={`px-2.5 py-0.5 rounded-full text-2xs font-bold border inline-flex items-center space-x-1 ${
-              hasGatewayKey 
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                : 'bg-slate-100 text-slate-600 border-slate-200'
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${hasGatewayKey ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
-              <span>{hasGatewayKey ? `API ${activeProvider === 'bablast' ? 'Bablast.id' : 'Fonnte'} Aktif` : 'API Key Belum Diisi'}</span>
-            </span>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              title="Klik untuk membuka pengaturan integrasi WhatsApp"
+              className={`px-3 py-1 rounded-full text-2xs font-bold border inline-flex items-center space-x-1.5 transition-all cursor-pointer ${
+                waState.isConnected 
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
+                  : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${waState.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+              <span>
+                {waState.isConnected 
+                  ? `WhatsApp HP Terhubung (+${waState.phoneNumber || 'Aktif'})` 
+                  : 'WhatsApp Belum Tertaut (Klik Scan QR)'}
+              </span>
+            </button>
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mt-1">
             Pesan WhatsApp Terjadwal
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-            Kelola pesan WhatsApp otomatis terjadwal untuk mitra, pelanggan, atau keluarga. Lengkap dengan pilihan integrasi API gateway Bablast.id &amp; Fonnte serta pengujian pesan langsung.
+            Kelola pesan WhatsApp otomatis terjadwal untuk mitra, pelanggan, atau keluarga. Terhubung langsung ke nomor HP WhatsApp Anda tanpa perantara pihak ketiga.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          {/* Gateway Settings Toggle Button (Bablast.id & Fonnte) */}
-          <button
-            id="btn-toggle-gateway"
-            type="button"
-            onClick={() => setShowGatewaySettings(!showGatewaySettings)}
-            className={`inline-flex items-center space-x-2 px-4 py-3 rounded-2xl text-xs sm:text-sm font-bold border transition-all cursor-pointer ${
-              showGatewaySettings 
-                ? 'bg-slate-900 text-white border-slate-900 shadow-xs' 
-                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-2xs'
-            }`}
-          >
-            {activeProvider === 'bablast' ? (
-              <Rocket className={`w-4 h-4 ${hasGatewayKey ? 'text-emerald-400' : 'text-slate-400'}`} />
-            ) : (
-              <Zap className={`w-4 h-4 ${hasGatewayKey ? 'text-teal-400' : 'text-slate-400'}`} />
-            )}
-            <span>API Gateway ({activeProvider === 'bablast' ? 'Bablast.id' : 'Fonnte'})</span>
-            {showGatewaySettings ? <ChevronUp className="w-4 h-4 ml-1" /> : <ChevronDown className="w-4 h-4 ml-1" />}
-          </button>
-
           {/* Add Scheduled WhatsApp Button */}
           <button
             id="btn-add-scheduled-wa"
@@ -246,13 +239,6 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Gateway API Key & Test Message Section (Collapsible or Expandable Card) */}
-      {showGatewaySettings && (
-        <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-          <FonnteSettingsCard onApiKeyChange={() => refreshGatewayState()} />
-        </div>
-      )}
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
@@ -280,34 +266,6 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
           <span className="text-3xs text-slate-400">Pesan berhasil dikirim</span>
         </div>
       </div>
-
-      {/* Quick Gateway Prompt Banner if not opened and key is missing */}
-      {!showGatewaySettings && !hasGatewayKey && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-white border border-emerald-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Rocket className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs sm:text-sm font-bold text-slate-900">
-                Ingin kirim WhatsApp otomatis tanpa buka browser WhatsApp Web?
-              </p>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Masukkan API Key dari <strong>Bablast.id</strong> atau <strong>Fonnte</strong> untuk mengaktifkan pengiriman langsung via server gateway.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowGatewaySettings(true)}
-            className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all shrink-0 cursor-pointer"
-          >
-            <Key className="w-3.5 h-3.5" />
-            <span>Pilihan API Gateway &amp; Tes</span>
-          </button>
-        </div>
-      )}
 
       {/* Global Feedback Banner for Gateway Direct Sends */}
       {gatewayFeedback && (
@@ -591,18 +549,14 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
 
                   {/* Send Action Buttons */}
                   <div className="flex items-center space-x-1.5">
-                    {/* If Gateway Key is active: Provide Direct Gateway Send */}
-                    {hasGatewayKey && (onSendViaGateway || onSendViaFonnte) && (
+                    {/* If WhatsApp device is connected: Provide Direct Automatic Background Send */}
+                    {waState.isConnected && onSendViaGateway && (
                       <button
                         type="button"
                         onClick={() => handleSendGatewayDirect(item)}
                         disabled={sendingGatewayId === item.id}
-                        title={`Kirim otomatis langsung via API ${activeProvider === 'bablast' ? 'Bablast.id' : 'Fonnte'} tanpa membuka WA Web`}
-                        className={`inline-flex items-center space-x-1 px-3 py-2 rounded-xl text-white text-xs font-bold shadow-2xs transition-all disabled:opacity-50 cursor-pointer ${
-                          activeProvider === 'bablast'
-                            ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700'
-                            : 'bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700'
-                        }`}
+                        title="Kirim pesan otomatis langsung dari HP WhatsApp Anda"
+                        className="inline-flex items-center space-x-1 px-3 py-2 rounded-xl text-white text-xs font-bold shadow-2xs transition-all disabled:opacity-50 cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700"
                       >
                         {sendingGatewayId === item.id ? (
                           <>
@@ -611,26 +565,26 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
                           </>
                         ) : (
                           <>
-                            {activeProvider === 'bablast' ? (
-                              <Rocket className="w-3 h-3" />
-                            ) : (
-                              <Zap className="w-3 h-3" />
-                            )}
-                            <span>{activeProvider === 'bablast' ? 'Kirim Bablast' : 'Kirim Fonnte'}</span>
+                            <Zap className="w-3 h-3" />
+                            <span>Kirim Otomatis</span>
                           </>
                         )}
                       </button>
                     )}
 
-                    {/* Primary Send WhatsApp via Web / App */}
+                    {/* Primary Send WhatsApp via Web / App (Manual link) */}
                     <button
                       type="button"
                       onClick={() => onSendNow(item)}
-                      title="Buka WhatsApp Web / Aplikasi"
-                      className="inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+                      title="Buka WhatsApp Web / Aplikasi secara manual"
+                      className={`inline-flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer ${
+                        waState.isConnected
+                          ? 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      }`}
                     >
                       <Send className="w-3.5 h-3.5" />
-                      <span>{hasGatewayKey ? 'Buka WA' : 'Kirim Sekarang'}</span>
+                      <span>{waState.isConnected ? 'Buka WA Web' : 'Kirim Sekarang'}</span>
                       <ExternalLink className="w-3 h-3 opacity-80" />
                     </button>
                   </div>

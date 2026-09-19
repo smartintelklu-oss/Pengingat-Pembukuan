@@ -1,282 +1,155 @@
 /**
- * Unified WhatsApp Gateway Utilities (Bablast.id & Fonnte)
+ * Self-Hosted WhatsApp Gateway Utilities (Option 1 - Direct Multi-Device QR Scanner)
+ * No third-party API (Fonnte/Bablast) required. Connects directly to user's phone.
  */
 
-export type WhatsAppProvider = 'bablast' | 'fonnte';
+export type WhatsAppConnectionStatus = 'disconnected' | 'connecting' | 'qr_ready' | 'connected';
 
-const STORAGE_KEY_PROVIDER = 'wa_active_provider';
-const STORAGE_KEY_BABLAST_API_KEY = 'bablast_api_key';
-const STORAGE_KEY_BABLAST_SENDER_CODE = 'bablast_sender_code';
-const STORAGE_KEY_FONNTE_API_KEY = 'fonnte_api_key';
-
-export interface BablastSendResult {
-  status: boolean;
-  message: string;
-  data?: any;
-  error?: string;
-}
-
-export interface FonnteDeviceStatus {
-  status: boolean;
-  device?: string;
-  device_status?: 'connect' | 'disconnect' | string;
-  quota?: number | string;
-  expired?: string;
-  message?: string;
-}
-
-export interface FonnteSendResult {
-  status: boolean;
-  message: string;
-  data?: any;
-  error?: string;
+export interface WhatsAppState {
+  status: WhatsAppConnectionStatus;
+  isConnected: boolean;
+  qrCode: string | null;
+  phoneNumber: string | null;
+  pushName: string | null;
+  lastConnectedAt: string | null;
+  lastError: string | null;
 }
 
 export interface GatewaySendResult {
   status: boolean;
   message: string;
-  provider: WhatsAppProvider;
+  messageId?: string;
   data?: any;
   error?: string;
+  provider?: string;
 }
 
-// ----------------------------------------------------
-// 1. Active Provider Helpers
-// ----------------------------------------------------
-
-export function getActiveWhatsAppProvider(): WhatsAppProvider {
-  if (typeof window === 'undefined') return 'bablast';
-  const saved = localStorage.getItem(STORAGE_KEY_PROVIDER);
-  if (saved === 'bablast' || saved === 'fonnte') {
-    return saved;
-  }
-  // Auto-detect based on what key the user has saved
-  const bablast = getSavedBablastApiKey();
-  const fonnte = getSavedFonnteApiKey();
-  if (bablast && !fonnte) return 'bablast';
-  if (fonnte && !bablast) return 'fonnte';
-  return 'bablast'; // default to Bablast.id
-}
-
-export function setActiveWhatsAppProvider(provider: WhatsAppProvider): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY_PROVIDER, provider);
-}
-
-// ----------------------------------------------------
-// 2. Bablast.id Storage & API Helpers
-// ----------------------------------------------------
-
-export function getSavedBablastApiKey(): string {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem(STORAGE_KEY_BABLAST_API_KEY) || '';
-}
-
-export function saveBablastApiKey(key: string): void {
-  if (typeof window === 'undefined') return;
-  if (!key.trim()) {
-    localStorage.removeItem(STORAGE_KEY_BABLAST_API_KEY);
-  } else {
-    localStorage.setItem(STORAGE_KEY_BABLAST_API_KEY, key.trim());
-  }
-}
-
-export function getSavedBablastSenderCode(): string {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem(STORAGE_KEY_BABLAST_SENDER_CODE) || '';
-}
-
-export function saveBablastSenderCode(code: string): void {
-  if (typeof window === 'undefined') return;
-  if (!code.trim()) {
-    localStorage.removeItem(STORAGE_KEY_BABLAST_SENDER_CODE);
-  } else {
-    localStorage.setItem(STORAGE_KEY_BABLAST_SENDER_CODE, code.trim());
+/**
+ * Fetches the current WhatsApp connection status from the backend
+ */
+export async function getWhatsAppStatus(): Promise<WhatsAppState> {
+  try {
+    const res = await fetch('/api/whatsapp/status');
+    if (!res.ok) {
+      throw new Error(`Server returned HTTP ${res.status}`);
+    }
+    const data: WhatsAppState = await res.json();
+    return data;
+  } catch (err: any) {
+    return {
+      status: 'disconnected',
+      isConnected: false,
+      qrCode: null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: err.message || 'Gagal menghubungi server WhatsApp backend.',
+    };
   }
 }
 
 /**
- * Sends a message via Bablast.id WhatsApp Gateway (api.bablast.id)
+ * Initializes or starts WhatsApp connection / generates a fresh QR code
  */
-export async function sendViaBablast(params: {
-  target: string;
-  message: string;
-  apiKey?: string;
-  senderCode?: string;
-}): Promise<BablastSendResult> {
-  const token = (params.apiKey !== undefined ? params.apiKey : getSavedBablastApiKey()).trim();
-  const senderCode = (params.senderCode !== undefined ? params.senderCode : getSavedBablastSenderCode()).trim();
-
-  const response = await fetch('/api/bablast/send', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      apiKey: token,
-      senderCode: senderCode || undefined,
-      target: params.target,
-      message: params.message,
-    }),
-  });
-
-  const result = await response.json().catch(() => ({
-    status: false,
-    message: 'Gagal mengurai respon dari gateway Bablast.id.',
-  }));
-
-  return result;
-}
-
-// ----------------------------------------------------
-// 3. Fonnte Storage & API Helpers
-// ----------------------------------------------------
-
-export function getSavedFonnteApiKey(): string {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem(STORAGE_KEY_FONNTE_API_KEY) || '';
-}
-
-export function saveFonnteApiKey(key: string): void {
-  if (typeof window === 'undefined') return;
-  if (!key.trim()) {
-    localStorage.removeItem(STORAGE_KEY_FONNTE_API_KEY);
-  } else {
-    localStorage.setItem(STORAGE_KEY_FONNTE_API_KEY, key.trim());
+export async function connectWhatsApp(forceFresh: boolean = false): Promise<WhatsAppState> {
+  try {
+    const res = await fetch('/api/whatsapp/connect', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ forceFresh }),
+    });
+    const data: WhatsAppState = await res.json();
+    return data;
+  } catch (err: any) {
+    return {
+      status: 'disconnected',
+      isConnected: false,
+      qrCode: null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: err.message || 'Gagal memulai koneksi WhatsApp.',
+    };
   }
 }
 
-export async function checkFonnteDeviceStatus(apiKey?: string): Promise<FonnteDeviceStatus> {
-  const token = (apiKey !== undefined ? apiKey : getSavedFonnteApiKey()).trim();
-  
-  const response = await fetch('/api/fonnte/device-status', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ apiKey: token }),
-  });
-
-  const data = await response.json().catch(() => ({
-    status: false,
-    message: 'Gagal memproses respon server Fonnte.',
-  }));
-
-  return data;
+/**
+ * Disconnects and logs out the linked WhatsApp device
+ */
+export async function disconnectWhatsApp(): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch('/api/whatsapp/disconnect', {
+      method: 'POST',
+    });
+    const data = await res.json();
+    return {
+      success: data.success ?? true,
+      message: data.message || 'Perangkat WhatsApp berhasil diputuskan.',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Gagal memutuskan sambungan WhatsApp.',
+    };
+  }
 }
 
-export async function sendViaFonnte(params: {
-  target: string;
-  message: string;
-  apiKey?: string;
-}): Promise<FonnteSendResult> {
-  const token = (params.apiKey !== undefined ? params.apiKey : getSavedFonnteApiKey()).trim();
-
-  const response = await fetch('/api/fonnte/send', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      apiKey: token,
-      target: params.target,
-      message: params.message,
-    }),
-  });
-
-  const result = await response.json().catch(() => ({
-    status: false,
-    message: 'Gagal mengurai respon dari server pengirim Fonnte.',
-  }));
-
-  return result;
-}
-
-// ----------------------------------------------------
-// 4. Unified Gateway Sender
-// ----------------------------------------------------
-
-export function getGatewayStatus(): {
-  activeProvider: WhatsAppProvider;
-  hasBablastKey: boolean;
-  hasFonnteKey: boolean;
-  hasActiveKey: boolean;
-  activeProviderName: string;
-} {
-  const activeProvider = getActiveWhatsAppProvider();
-  const hasBablastKey = Boolean(getSavedBablastApiKey().trim());
-  const hasFonnteKey = Boolean(getSavedFonnteApiKey().trim());
-  const hasActiveKey = activeProvider === 'bablast' ? hasBablastKey : hasFonnteKey;
-  const activeProviderName = activeProvider === 'bablast' ? 'Bablast.id' : 'Fonnte';
-
-  return {
-    activeProvider,
-    hasBablastKey,
-    hasFonnteKey,
-    hasActiveKey,
-    activeProviderName,
-  };
-}
-
+/**
+ * Sends a message automatically through the user's linked WhatsApp session
+ */
 export async function sendViaActiveGateway(params: {
   target: string;
   message: string;
 }): Promise<GatewaySendResult> {
-  const { activeProvider, hasBablastKey, hasFonnteKey } = getGatewayStatus();
+  try {
+    const res = await fetch('/api/whatsapp/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        target: params.target,
+        message: params.message,
+      }),
+    });
 
-  if (activeProvider === 'bablast') {
-    if (!hasBablastKey) {
-      // If no Bablast key but Fonnte key is present, fallback with message
-      if (hasFonnteKey) {
-        const fonnteRes = await sendViaFonnte(params);
-        return {
-          status: fonnteRes.status,
-          message: fonnteRes.message,
-          provider: 'fonnte',
-          data: fonnteRes.data,
-        };
-      }
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok || !data) {
       return {
         status: false,
-        message: 'API Key Bablast.id belum dikonfigurasi. Silakan masukkan token Anda pada menu API Gateway.',
-        provider: 'bablast',
+        message: (data && data.message) || `Gagal mengirim WhatsApp (Status HTTP: ${res.status})`,
+        provider: 'direct-wa',
       };
     }
 
-    const res = await sendViaBablast(params);
     return {
-      status: res.status,
-      message: res.message,
-      provider: 'bablast',
-      data: res.data,
-      error: res.error,
+      status: data.success ?? true,
+      message: data.message || 'Pesan WhatsApp berhasil dikirim secara otomatis!',
+      messageId: data.messageId,
+      provider: 'direct-wa',
+      data,
     };
-  } else {
-    // Fonnte
-    if (!hasFonnteKey) {
-      if (hasBablastKey) {
-        const babRes = await sendViaBablast(params);
-        return {
-          status: babRes.status,
-          message: babRes.message,
-          provider: 'bablast',
-          data: babRes.data,
-        };
-      }
-      return {
-        status: false,
-        message: 'API Key Fonnte belum dikonfigurasi. Silakan masukkan token Anda pada menu API Gateway.',
-        provider: 'fonnte',
-      };
-    }
-
-    const res = await sendViaFonnte(params);
+  } catch (err: any) {
     return {
-      status: res.status,
-      message: res.message,
-      provider: 'fonnte',
-      data: res.data,
-      error: res.error,
+      status: false,
+      message: err.message || 'Gagal terhubung ke server untuk mengirim WhatsApp.',
+      provider: 'direct-wa',
     };
   }
 }
+
+/**
+ * Helper to get quick status summary for UI badges
+ */
+export function getGatewayStatus() {
+  return {
+    activeProvider: 'direct-wa',
+    hasActiveKey: true,
+    activeProviderName: 'WhatsApp QR Langsung (Self-Hosted)',
+  };
+}
+
+export type WhatsAppProvider = 'direct-wa';

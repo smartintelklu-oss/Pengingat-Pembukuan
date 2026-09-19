@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // User profile document
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // User's private reminders subcollection
+      match /reminders/{reminderId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User's private ledgers subcollection
+      match /ledgers/{ledgerId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User's private transactions subcollection
+      match /transactions/{transactionId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // User's private scheduled WhatsApp messages subcollection
+      match /scheduledWhatsApp/{waId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Connection testing document
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

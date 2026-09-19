@@ -4,6 +4,8 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
+import { waManager } from "./server/whatsapp";
+
 dotenv.config();
 
 const app = express();
@@ -151,210 +153,72 @@ Berikan output dalam format JSON valid dengan struktur:
   }
 });
 
-// API: Fonnte WhatsApp Gateway Integration
-// 1. Get default server configuration status
-app.get("/api/fonnte/config", (req, res) => {
-  const hasEnvKey = Boolean(process.env.FONNTE_API_KEY && process.env.FONNTE_API_KEY.trim().length > 0);
-  res.json({ hasEnvKey });
+// API: Self-Hosted WhatsApp Gateway (Option 1 - Direct QR Code Scanner & Baileys Multi-Device)
+// 1. Get current WhatsApp connection status, QR code, and linked profile
+app.get("/api/whatsapp/status", (req, res) => {
+  res.json(waManager.getState());
 });
 
-// 2. Check Fonnte device connection status & quota
-app.post("/api/fonnte/device-status", async (req, res) => {
+// 2. Start connection or generate a new QR code for scanning
+app.post("/api/whatsapp/connect", async (req, res) => {
   try {
-    const token = (req.body.apiKey || process.env.FONNTE_API_KEY || "").trim();
-    if (!token) {
-      return res.status(400).json({
-        status: false,
-        message: "API Key / Token Fonnte belum dimasukkan.",
-      });
-    }
-
-    const response = await fetch("https://api.fonnte.com/device", {
-      method: "POST",
-      headers: {
-        Authorization: token,
-      },
-    });
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok || !data) {
-      return res.status(response.status || 500).json({
-        status: false,
-        message: (data && data.reason) || `Gagal menghubungi server Fonnte (Status: ${response.status})`,
-        raw: data,
-      });
-    }
-
-    res.json(data);
+    const forceFresh = req.body?.forceFresh === true;
+    const state = await waManager.init(forceFresh);
+    res.json(state);
   } catch (error: any) {
-    console.error("Error checking Fonnte device status:", error);
+    console.error("[API] Error initiating WhatsApp connect:", error);
     res.status(500).json({
-      status: false,
-      message: error.message || "Terjadi kesalahan saat memeriksa status perangkat Fonnte.",
+      status: "disconnected",
+      isConnected: false,
+      qrCode: null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: error.message || "Gagal memulai inisialisasi WhatsApp.",
     });
   }
 });
 
-// 3. Send WhatsApp message (Direct or Test) via Fonnte Gateway
-app.post("/api/fonnte/send", async (req, res) => {
+// 3. Disconnect / logout WhatsApp session
+app.post("/api/whatsapp/disconnect", async (req, res) => {
   try {
-    const { apiKey, target, message, countryCode = "62" } = req.body;
-    const token = (apiKey || process.env.FONNTE_API_KEY || "").trim();
-
-    if (!token) {
-      return res.status(400).json({
-        status: false,
-        message: "API Key / Token Fonnte belum diisi. Silakan masukkan token Fonnte Anda terlebih dahulu.",
-      });
-    }
-
-    if (!target || !message) {
-      return res.status(400).json({
-        status: false,
-        message: "Nomor WhatsApp tujuan dan pesan teks harus diisi.",
-      });
-    }
-
-    // Format target phone number cleanly
-    const cleanedTarget = target.toString().replace(/[^\d,+]/g, "");
-
-    const formParams = new URLSearchParams();
-    formParams.append("target", cleanedTarget);
-    formParams.append("message", message);
-    formParams.append("countryCode", countryCode);
-
-    const response = await fetch("https://api.fonnte.com/send", {
-      method: "POST",
-      headers: {
-        Authorization: token,
-      },
-      body: formParams,
-    });
-
-    const data: any = await response.json().catch(() => null);
-
-    if (!response.ok || !data) {
-      return res.status(response.status || 500).json({
-        status: false,
-        message: (data && data.reason) || `Gagal mengirim melalui Fonnte (Status: ${response.status})`,
-        raw: data,
-      });
-    }
-
-    // Fonnte returns { status: true, id: [...], process: 'processing' } or { status: false, reason: '...' }
-    if (data.status === false) {
-      return res.status(400).json({
-        status: false,
-        message: data.reason || "Server Fonnte menolak pengiriman pesan (periksa koneksi perangkat Anda di Fonnte).",
-        raw: data,
-      });
-    }
-
+    await waManager.logout();
     res.json({
-      status: true,
-      message: "Pesan berhasil dikirim ke antrean Fonnte!",
-      data,
+      success: true,
+      message: "Perangkat WhatsApp berhasil diputuskan.",
+      state: waManager.getState(),
     });
   } catch (error: any) {
-    console.error("Error sending message via Fonnte:", error);
+    console.error("[API] Error disconnecting WhatsApp:", error);
     res.status(500).json({
-      status: false,
-      message: error.message || "Gagal menghubungi API gateway Fonnte.",
+      success: false,
+      message: error.message || "Gagal memutuskan sambungan WhatsApp.",
     });
   }
 });
 
-// API: Bablast.id WhatsApp Gateway Integration
-// 1. Get default server configuration status for Bablast
-app.get("/api/bablast/config", (req, res) => {
-  const hasEnvKey = Boolean(process.env.BABLAST_API_KEY && process.env.BABLAST_API_KEY.trim().length > 0);
-  const defaultSenderCode = process.env.BABLAST_SENDER_CODE || "";
-  res.json({ hasEnvKey, defaultSenderCode });
-});
-
-// 2. Send WhatsApp message (Direct or Test) via Bablast.id Gateway
-app.post("/api/bablast/send", async (req, res) => {
+// 4. Send WhatsApp message directly through the linked session (Background & Automatic)
+app.post("/api/whatsapp/send", async (req, res) => {
   try {
-    const { apiKey, senderCode, target, message } = req.body;
-    const rawToken = (apiKey || process.env.BABLAST_API_KEY || "").trim();
-
-    if (!rawToken) {
-      return res.status(400).json({
-        status: false,
-        message: "API Key / Token Bablast.id belum diisi. Silakan masukkan API Key Bablast.id Anda terlebih dahulu.",
-      });
-    }
-
+    const { target, message } = req.body;
     if (!target || !message) {
       return res.status(400).json({
-        status: false,
+        success: false,
         message: "Nomor WhatsApp tujuan dan pesan teks harus diisi.",
       });
     }
 
-    // Format target phone number into standard international format without '+' (e.g. 6281234567890)
-    let cleanedTarget = target.toString().replace(/[^\d]/g, "");
-    if (cleanedTarget.startsWith("0")) {
-      cleanedTarget = "62" + cleanedTarget.slice(1);
-    } else if (cleanedTarget.startsWith("62")) {
-      // already starting with 62
-    } else if (!cleanedTarget.startsWith("62") && cleanedTarget.length > 8) {
-      cleanedTarget = "62" + cleanedTarget;
+    const result = await waManager.sendMessage(target, message);
+    if (!result.success) {
+      return res.status(400).json(result);
     }
 
-    // Ensure Bearer prefix for Bablast Authorization header
-    const authHeader = rawToken.startsWith("Bearer ") ? rawToken : `Bearer ${rawToken}`;
-
-    const payload: Record<string, any> = {
-      phone: cleanedTarget,
-      message: message,
-    };
-
-    const effectiveSenderCode = (senderCode || process.env.BABLAST_SENDER_CODE || "").trim();
-    if (effectiveSenderCode) {
-      payload.sender_code = effectiveSenderCode;
-    }
-
-    const response = await fetch("https://api.bablast.id/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: authHeader,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data: any = await response.json().catch(() => null);
-
-    if (!response.ok || !data) {
-      const errorMsg = data?.message || data?.error || (data?.errors && JSON.stringify(data.errors)) || `Gagal menghubungi server Bablast.id (Status: ${response.status})`;
-      return res.status(response.status || 500).json({
-        status: false,
-        message: errorMsg,
-        raw: data,
-      });
-    }
-
-    // Check if Bablast reported failure in body
-    if (data.status === false || data.success === false || data.error) {
-      return res.status(400).json({
-        status: false,
-        message: data.message || data.error || "Server Bablast.id menolak pengiriman pesan (periksa token / sender_code / kuota).",
-        raw: data,
-      });
-    }
-
-    res.json({
-      status: true,
-      message: data.message || "Pesan WhatsApp berhasil terkirim melalui Bablast.id!",
-      data,
-    });
+    res.json(result);
   } catch (error: any) {
-    console.error("Error sending message via Bablast.id:", error);
+    console.error("[API] Error sending WhatsApp message:", error);
     res.status(500).json({
-      status: false,
-      message: error.message || "Gagal menghubungi API gateway Bablast.id.",
+      success: false,
+      message: error.message || "Terjadi kesalahan internal saat mengirim pesan WhatsApp.",
     });
   }
 });

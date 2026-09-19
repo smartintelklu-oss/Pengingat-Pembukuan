@@ -1,6 +1,6 @@
 {
   "name": "Catatan Pengingat & Pembukuan",
-  "description": "Aplikasi catatan pengingat tugas dengan notifikasi suara AI, kalender, pesan WhatsApp terjadwal dengan integrasi API gateway Bablast.id & Fonnte, dan pembukuan keuangan dengan ekspor PDF & Excel.",
+  "description": "Aplikasi catatan pengingat tugas dengan notifikasi suara AI, kalender, pesan WhatsApp terjadwal dengan scan QR mandiri, dan pembukuan keuangan dengan ekspor PDF & Excel.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

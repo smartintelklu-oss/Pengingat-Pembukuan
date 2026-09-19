@@ -14,9 +14,17 @@ import {
   Layers,
   ChevronRight,
   TrendingUp,
-  Plus
+  Plus,
+  Settings,
+  Key,
+  User,
+  Users,
+  Cloud,
+  LogIn,
+  ShieldCheck,
+  Briefcase
 } from 'lucide-react';
-import { AppTab, ReminderTask, Transaction, ScheduledWhatsApp } from '../types';
+import { AppTab, ReminderTask, Transaction, ScheduledWhatsApp, AppUser } from '../types';
 import { playNotificationChime } from '../utils/audio';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -33,6 +41,8 @@ interface HomeGlassNavProps {
   recentReminders?: ReminderTask[];
   recentTransactions?: Transaction[];
   recentScheduledWhatsApp?: ScheduledWhatsApp[];
+  currentUser?: AppUser;
+  onOpenAccountModal?: () => void;
 }
 
 export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
@@ -47,6 +57,8 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
   recentReminders = [],
   recentTransactions = [],
   recentScheduledWhatsApp = [],
+  currentUser,
+  onOpenAccountModal,
 }) => {
   return (
     <section 
@@ -77,6 +89,44 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
 
           {/* Quick Utility Actions */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+            {/* Quick Access to Login Page for Owner / Staff */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('login')}
+              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white border border-slate-800 shadow-xs hover:shadow-sm text-xs font-bold transition-all cursor-pointer"
+              title="Buka Halaman Masuk Akun Pemilik & Staf"
+            >
+              <LogIn className="w-4 h-4 text-emerald-400" />
+              <span>Masuk Akun (Pemilik/Staf)</span>
+            </button>
+
+            {onOpenAccountModal && (
+              <button
+                type="button"
+                onClick={onOpenAccountModal}
+                className={`inline-flex items-center space-x-2 px-4 py-2.5 rounded-2xl border backdrop-blur-md shadow-2xs hover:shadow-xs text-xs font-bold transition-all cursor-pointer ${
+                  currentUser?.isCloudUser
+                    ? 'bg-emerald-50/90 hover:bg-emerald-100 text-emerald-900 border-emerald-300/80'
+                    : 'bg-indigo-50/90 hover:bg-indigo-100 text-indigo-900 border-indigo-200/80'
+                }`}
+                title="Ganti Akun Pengguna / Sinkronisasi Firebase Cloud"
+              >
+                {currentUser?.role === 'owner' ? (
+                  <ShieldCheck className="w-4 h-4 text-amber-600" />
+                ) : (
+                  <Briefcase className="w-4 h-4 text-teal-600" />
+                )}
+                <span>Akun: <strong>{currentUser?.displayName || 'Profil'}</strong></span>
+                <span className={`px-1.5 py-0.5 rounded-full text-3xs font-extrabold ${
+                  currentUser?.role === 'owner' ? 'bg-amber-100 text-amber-800' : 'bg-teal-100 text-teal-800'
+                }`}>
+                  {currentUser?.role === 'owner' ? 'Pemilik' : 'Staf'}
+                </span>
+                {currentUser?.isCloudUser && (
+                  <span className="px-1.5 py-0.5 rounded-full text-3xs font-extrabold bg-emerald-600 text-white">Cloud</span>
+                )}
+              </button>
+            )}
             <PWAInstallButton />
             <button
               type="button"
@@ -87,11 +137,20 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
               <Volume2 className="w-4 h-4 text-emerald-600" />
               <span>Tes Alarm Suara AI</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500/30 shadow-xs hover:shadow-sm text-xs font-bold transition-all cursor-pointer"
+              title="Buka Halaman Pengaturan & Tautkan WhatsApp"
+            >
+              <Settings className="w-4 h-4" />
+              <span>Tautkan WhatsApp (Scan QR)</span>
+            </button>
           </div>
         </div>
       </div>
 
-      {/* 2. THREE MODERN GLASS ICON BUTTONS (Main Request) */}
+      {/* 2. FOUR MODERN GLASS ICON BUTTONS (Main Request) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center space-x-2">
@@ -105,8 +164,8 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
           </span>
         </div>
 
-        {/* 3 Glass Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 sm:gap-6">
+        {/* 4 Glass Cards Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 sm:gap-6">
           
           {/* ======================================================== */}
           {/* TOMBOL KACA 1: PENGINGAT (AGENDA & TUGAS)               */}
@@ -222,7 +281,7 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
           </div>
 
           {/* ======================================================== */}
-          {/* TOMBOL KACA 3: WHATSAPP (PESAN TERJADWAL & FONNTE)      */}
+          {/* TOMBOL KACA 3: WHATSAPP (PESAN TERJADWAL & OTOMATIS)    */}
           {/* ======================================================== */}
           <div
             id="btn-masuk-halaman-whatsapp"
@@ -257,7 +316,7 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
 
               {/* Title */}
               <h4 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight group-hover:text-green-700 transition-colors">
-                WhatsApp Terjadwal &amp; Gateway
+                WhatsApp Terjadwal &amp; Otomatis
               </h4>
 
               {/* Live Info Badges */}
@@ -275,6 +334,60 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
             <div className="pt-5 mt-4 border-t border-slate-100/80">
               <div className="w-full flex items-center justify-between py-2.5 px-4 rounded-2xl bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 group-hover:from-green-700 group-hover:to-emerald-700 text-white text-xs sm:text-sm font-bold shadow-sm shadow-green-600/20 transition-all">
                 <span>Masuk Halaman WhatsApp</span>
+                <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+              </div>
+            </div>
+          </div>
+
+          {/* ======================================================== */}
+          {/* TOMBOL KACA 4: PENGATURAN (WHATSAPP QR & SISTEM)        */}
+          {/* ======================================================== */}
+          <div
+            id="btn-masuk-halaman-pengaturan"
+            onClick={() => setActiveTab('settings')}
+            className="group relative text-left p-6 sm:p-7 rounded-3xl bg-white/70 hover:bg-white/90 backdrop-blur-2xl backdrop-saturate-180 border border-white/80 hover:border-indigo-300 shadow-[0_10px_30px_-5px_rgba(0,0,0,0.05)] hover:shadow-[0_20px_40px_-10px_rgba(99,102,241,0.18)] transition-all duration-300 flex flex-col justify-between cursor-pointer overflow-hidden ring-1 ring-slate-900/5 hover:ring-indigo-500/20"
+          >
+            {/* Specular highlight */}
+            <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white to-transparent pointer-events-none" />
+            {/* Ambient soft glow on hover */}
+            <div className="absolute -top-12 -right-12 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl group-hover:bg-indigo-500/20 transition-all pointer-events-none" />
+
+            <div>
+              {/* Header: Glowing Glass Icon & Badge */}
+              <div className="flex items-start justify-between gap-3 mb-5">
+                {/* 3D Glass Icon (Area Sentuh 48x48 dp, Ikon 24x24 dp) */}
+                <div 
+                  className="relative w-12 h-12 min-w-[48px] min-h-[48px] rounded-2xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-sky-500 text-white flex items-center justify-center shadow-md shadow-indigo-600/25 border border-white/40 group-hover:scale-105 transition-transform duration-300 shrink-0"
+                  style={{ width: '48px', height: '48px' }}
+                >
+                  <Key className="w-6 h-6 shrink-0" style={{ width: '24px', height: '24px' }} />
+                </div>
+
+                <span className="px-2.5 py-1 rounded-full text-2xs font-extrabold uppercase tracking-wider bg-indigo-50 border border-indigo-200 text-indigo-800">
+                  Modul 04
+                </span>
+              </div>
+
+              {/* Title */}
+              <h4 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight group-hover:text-indigo-700 transition-colors">
+                Pengaturan &amp; Tautkan WhatsApp
+              </h4>
+
+              {/* Live Info Badges */}
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                <span className="px-2.5 py-1 rounded-xl text-2xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80">
+                  Scan Barcode QR WhatsApp
+                </span>
+                <span className="px-2.5 py-1 rounded-xl text-2xs font-semibold bg-slate-100/80 text-slate-600">
+                  Suara AI &amp; Cadangan
+                </span>
+              </div>
+            </div>
+
+            {/* Bottom Glass Action Button: Masuk Halaman Baru */}
+            <div className="pt-5 mt-4 border-t border-slate-100/80">
+              <div className="w-full flex items-center justify-between py-2.5 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-blue-600 to-sky-600 group-hover:from-indigo-700 group-hover:to-blue-700 text-white text-xs sm:text-sm font-bold shadow-sm shadow-indigo-600/20 transition-all">
+                <span>Masuk Halaman Pengaturan</span>
                 <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
               </div>
             </div>

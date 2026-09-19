@@ -1,4 +1,4 @@
-import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp } from '../types';
+import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp, AppUser, UserRole } from '../types';
 
 const STORAGE_KEYS = {
   REMINDERS: 'catatan_reminders_v1',
@@ -381,4 +381,178 @@ export function saveScheduledWhatsApp(items: ScheduledWhatsApp[]): void {
     console.error('Error saving scheduled WhatsApp:', e);
   }
 }
+
+// User-scoped Local Storage helpers for multi-profile support
+const USER_PROFILES_KEY = 'catatan_local_user_profiles_v1';
+const ACTIVE_USER_ID_KEY = 'catatan_active_user_id_v1';
+
+export const DEFAULT_LOCAL_USERS: AppUser[] = [
+  {
+    id: 'user-utama',
+    displayName: 'Budi Santoso (Pemilik)',
+    email: 'pemilik@usaha.id',
+    role: 'owner',
+    pin: '1234',
+    isCloudUser: false,
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'user-kasir',
+    displayName: 'Siti Rahma (Staf / Kasir)',
+    email: 'staf@usaha.id',
+    role: 'staff',
+    pin: '0000',
+    isCloudUser: false,
+    createdAt: new Date().toISOString(),
+  }
+];
+
+export function loadLocalUserProfiles(): AppUser[] {
+  try {
+    const raw = localStorage.getItem(USER_PROFILES_KEY);
+    if (!raw) {
+      localStorage.setItem(USER_PROFILES_KEY, JSON.stringify(DEFAULT_LOCAL_USERS));
+      return DEFAULT_LOCAL_USERS;
+    }
+    const parsed: AppUser[] = JSON.parse(raw);
+    // Ensure existing profiles have role and pin defaults if older version was stored
+    return parsed.map((u, index) => ({
+      ...u,
+      role: u.role || (index === 0 ? 'owner' : 'staff'),
+      pin: u.pin || (index === 0 ? '1234' : '0000'),
+    }));
+  } catch {
+    return DEFAULT_LOCAL_USERS;
+  }
+}
+
+export function saveLocalUserProfiles(profiles: AppUser[]): void {
+  try {
+    localStorage.setItem(USER_PROFILES_KEY, JSON.stringify(profiles));
+  } catch (e) {
+    console.error('Error saving profiles:', e);
+  }
+}
+
+export function loadActiveUserId(): string {
+  try {
+    return localStorage.getItem(ACTIVE_USER_ID_KEY) || 'user-utama';
+  } catch {
+    return 'user-utama';
+  }
+}
+
+export function saveActiveUserId(id: string): void {
+  try {
+    localStorage.setItem(ACTIVE_USER_ID_KEY, id);
+  } catch (e) {
+    console.error('Error saving active user id:', e);
+  }
+}
+
+// Scoped loaders & savers by User ID
+export function loadScopedReminders(userId: string): ReminderTask[] {
+  try {
+    const key = `catatan_reminders_user_${userId}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      // First time loading for this user: use defaults for main user or empty/custom for new user
+      const initial = userId === 'user-utama' ? DEFAULT_REMINDERS : [
+        {
+          ...DEFAULT_REMINDERS[0],
+          id: `rem-u-${userId}-${Date.now()}`,
+          title: `Pengingat Khusus Akun (${userId.slice(0, 8)})`,
+          note: 'Catatan pengingat privat tersendiri untuk akun ini.',
+        }
+      ];
+      localStorage.setItem(key, JSON.stringify(initial));
+      return initial;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error loading scoped reminders:', e);
+    return [];
+  }
+}
+
+export function saveScopedReminders(userId: string, reminders: ReminderTask[]): void {
+  try {
+    localStorage.setItem(`catatan_reminders_user_${userId}`, JSON.stringify(reminders));
+  } catch (e) {
+    console.error('Error saving scoped reminders:', e);
+  }
+}
+
+export function loadScopedLedgers(userId: string): LedgerBook[] {
+  try {
+    const key = `catatan_ledgers_user_${userId}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      const initial = DEFAULT_LEDGERS;
+      localStorage.setItem(key, JSON.stringify(initial));
+      return initial;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error loading scoped ledgers:', e);
+    return DEFAULT_LEDGERS;
+  }
+}
+
+export function saveScopedLedgers(userId: string, ledgers: LedgerBook[]): void {
+  try {
+    localStorage.setItem(`catatan_ledgers_user_${userId}`, JSON.stringify(ledgers));
+  } catch (e) {
+    console.error('Error saving scoped ledgers:', e);
+  }
+}
+
+export function loadScopedTransactions(userId: string): Transaction[] {
+  try {
+    const key = `catatan_transactions_user_${userId}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      const initial = userId === 'user-utama' ? DEFAULT_TRANSACTIONS : [];
+      localStorage.setItem(key, JSON.stringify(initial));
+      return initial;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error loading scoped transactions:', e);
+    return [];
+  }
+}
+
+export function saveScopedTransactions(userId: string, transactions: Transaction[]): void {
+  try {
+    localStorage.setItem(`catatan_transactions_user_${userId}`, JSON.stringify(transactions));
+  } catch (e) {
+    console.error('Error saving scoped transactions:', e);
+  }
+}
+
+export function loadScopedScheduledWhatsApp(userId: string): ScheduledWhatsApp[] {
+  try {
+    const key = `catatan_wa_user_${userId}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      const initial = userId === 'user-utama' ? DEFAULT_SCHEDULED_WHATSAPP : [];
+      localStorage.setItem(key, JSON.stringify(initial));
+      return initial;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error loading scoped scheduled WhatsApp:', e);
+    return [];
+  }
+}
+
+export function saveScopedScheduledWhatsApp(userId: string, items: ScheduledWhatsApp[]): void {
+  try {
+    localStorage.setItem(`catatan_wa_user_${userId}`, JSON.stringify(items));
+  } catch (e) {
+    console.error('Error saving scoped scheduled WhatsApp:', e);
+  }
+}
+
 

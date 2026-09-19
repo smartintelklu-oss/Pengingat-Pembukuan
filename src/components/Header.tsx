@@ -11,10 +11,13 @@ import {
   WalletCards,
   Clock,
   MessageSquare,
-  Home
+  Home,
+  Settings
 } from 'lucide-react';
 import { playNotificationChime, requestNotificationPermission } from '../utils/audio';
-import { AppTab } from '../types';
+import { AppTab, AppUser } from '../types';
+import { User, Users, Cloud, CloudOff, LogIn, ShieldCheck, Briefcase } from 'lucide-react';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   activeTab: AppTab;
@@ -22,6 +25,8 @@ interface HeaderProps {
   pendingRemindersCount: number;
   pendingWhatsAppCount?: number;
   currentLedgerName: string;
+  currentUser?: AppUser;
+  onOpenAccountModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,6 +35,8 @@ export const Header: React.FC<HeaderProps> = ({
   pendingRemindersCount,
   pendingWhatsAppCount = 0,
   currentLedgerName,
+  currentUser,
+  onOpenAccountModal,
 }) => {
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [currentDateTime, setCurrentDateTime] = useState<string>('');
@@ -203,9 +210,47 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 )}
               </button>
+
+              {/* Tab 4: Pengaturan & Tautkan WhatsApp */}
+              <button
+                id="tab-settings-btn"
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                className={`relative flex items-center space-x-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
+                  activeTab === 'settings'
+                    ? 'bg-white/95 text-slate-900 shadow-sm border border-white/90 ring-1 ring-slate-900/5'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/40'
+                }`}
+              >
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  activeTab === 'settings' ? 'bg-emerald-50 text-emerald-600' : 'text-slate-500'
+                }`}>
+                  <Settings className="w-4 h-4" />
+                </div>
+                <span>Pengaturan &amp; WA</span>
+              </button>
+
+              {/* Tab 5: Masuk / Login Akun */}
+              <button
+                id="tab-login-btn"
+                type="button"
+                onClick={() => setActiveTab('login')}
+                className={`relative flex items-center space-x-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
+                  activeTab === 'login'
+                    ? 'bg-slate-900 text-white shadow-sm border border-slate-800'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/40'
+                }`}
+              >
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  activeTab === 'login' ? 'bg-white/20 text-white' : 'text-slate-500'
+                }`}>
+                  <LogIn className="w-4 h-4" />
+                </div>
+                <span>Masuk Akun</span>
+              </button>
             </nav>
 
-            {/* Glass Utility Controls (Test Chime & Web Notification Status) */}
+            {/* Glass Utility Controls (Test Chime, Notification Status & User Account Profile) */}
             <div className="flex items-center space-x-2">
               <button
                 id="btn-test-sound"
@@ -218,7 +263,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
 
               {permission === 'granted' ? (
-                <div className="hidden sm:inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 backdrop-blur-md text-emerald-800 border border-emerald-500/20 shadow-2xs">
+                <div className="hidden md:inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 backdrop-blur-md text-emerald-800 border border-emerald-500/20 shadow-2xs">
                   <CheckCircle2 className="w-3.5 h-3.5 mr-1.5 text-emerald-600 shrink-0" />
                   <span>Notifikasi Aktif</span>
                 </div>
@@ -230,10 +275,51 @@ export const Header: React.FC<HeaderProps> = ({
                   className="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 backdrop-blur-md text-amber-900 border border-amber-500/30 hover:border-amber-500/40 transition-all shadow-2xs cursor-pointer"
                 >
                   <BellRing className="w-3.5 h-3.5 mr-1.5 text-amber-600 animate-bounce" />
-                  <span className="hidden sm:inline">Aktifkan Notifikasi</span>
-                  <span className="sm:hidden">Notif</span>
+                  <span className="hidden lg:inline">Aktifkan Notifikasi</span>
+                  <span className="lg:hidden">Notif</span>
                 </button>
               )}
+
+              {/* User Account / Profile Switcher Button */}
+              {onOpenAccountModal && (
+                <button
+                  id="btn-user-account-switcher"
+                  type="button"
+                  onClick={onOpenAccountModal}
+                  className={`inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition-all cursor-pointer shadow-2xs ${
+                    currentUser?.isCloudUser 
+                      ? 'bg-emerald-50/80 hover:bg-emerald-100/90 text-emerald-900 border-emerald-300/80' 
+                      : 'bg-indigo-50/80 hover:bg-indigo-100/90 text-indigo-900 border-indigo-200/80'
+                  }`}
+                  title="Ganti Akun Pengguna / Sinkronisasi Cloud"
+                >
+                  {currentUser?.photoURL ? (
+                    <img 
+                      src={currentUser.photoURL} 
+                      alt={currentUser.displayName} 
+                      className="w-5 h-5 rounded-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">
+                      {currentUser ? currentUser.displayName.charAt(0).toUpperCase() : <User className="w-3 h-3" />}
+                    </div>
+                  )}
+                  <span className="hidden sm:inline truncate max-w-[110px]">
+                    {currentUser?.displayName || 'Akun'}
+                  </span>
+                  {currentUser?.isCloudUser ? (
+                    <Cloud className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  ) : (
+                    <Users className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  )}
+                </button>
+              )}
+
+              {/* Install PWA Button */}
+              <div className="hidden sm:block">
+                <PWAInstallButton />
+              </div>
             </div>
 
           </div>
@@ -320,6 +406,36 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
             <span className="hidden xs:inline">WA</span>
+          </button>
+
+          {/* Mobile Tab 4: Pengaturan & WA */}
+          <button
+            id="mobile-tab-settings"
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`flex-1 flex flex-col xs:flex-row items-center justify-center gap-1 xs:space-x-1.5 py-2 px-1 rounded-2xl text-[11px] font-bold transition-all cursor-pointer ${
+              activeTab === 'settings'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+            }`}
+          >
+            <Settings className="w-6 h-6 shrink-0" />
+            <span className="hidden xs:inline">Setting</span>
+          </button>
+
+          {/* Mobile Tab 5: Masuk Akun */}
+          <button
+            id="mobile-tab-login"
+            type="button"
+            onClick={() => setActiveTab('login')}
+            className={`flex-1 flex flex-col xs:flex-row items-center justify-center gap-1 xs:space-x-1.5 py-2 px-1 rounded-2xl text-[11px] font-bold transition-all cursor-pointer ${
+              activeTab === 'login'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/50'
+            }`}
+          >
+            <LogIn className="w-6 h-6 shrink-0" />
+            <span className="hidden xs:inline">Masuk</span>
           </button>
 
         </div>

@@ -1,6 +1,6 @@
 export type PriorityLevel = 'low' | 'medium' | 'high';
 
-export type AppTab = 'home' | 'reminders' | 'bookkeeping' | 'whatsapp';
+export type AppTab = 'home' | 'reminders' | 'bookkeeping' | 'whatsapp' | 'settings' | 'login';
 
 export type ReminderTiming = 
   | '0' // on time
@@ -100,4 +100,18 @@ export interface ScheduledWhatsApp {
   lastSentAt?: string;
   createdAt: string;
 }
+
+export type UserRole = 'owner' | 'staff';
+
+export interface AppUser {
+  id: string;
+  email?: string;
+  displayName: string;
+  photoURL?: string;
+  role?: UserRole; // 'owner' (Pemilik) atau 'staff' (Staf)
+  pin?: string; // Optional 4-6 digit PIN for quick credential protection
+  isCloudUser: boolean; // true if authenticated with Firebase Google/Email, false if local offline profile
+  createdAt: string;
+}
+
 
