@@ -114,4 +114,21 @@ export interface AppUser {
   createdAt: string;
 }
 
+export interface UserSettings {
+  userId: string;
+  // Voice & Alarm preferences
+  enableVoiceAssistant: boolean;
+  voicePitch: number; // 0.8 - 1.2
+  voiceRate: number; // 0.8 - 1.2
+  voiceTone: 'friendly' | 'professional' | 'urgent' | 'cheerful';
+  playChime: boolean;
+  // WhatsApp Gateway preferences
+  autoSendEnabled: boolean; // Auto-send when time is reached
+  antiSpamIntervalMinutes: 5 | 10 | 20 | 30; // Default interval for bulk/staggered sending
+  // Notification & App preferences
+  browserNotifications: boolean;
+  defaultReminderOffset: number; // minutes before due
+  updatedAt?: string;
+}
+
 

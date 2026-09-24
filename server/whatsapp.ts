@@ -12,21 +12,33 @@ import makeWASocket, {
 export type WhatsAppConnectionStatus = "disconnected" | "connecting" | "qr_ready" | "connected";
 
 export interface WhatsAppState {
+  userId: string;
   status: WhatsAppConnectionStatus;
   isConnected: boolean;
   qrCode: string | null;
+  rawQr?: string | null;
   phoneNumber: string | null;
   pushName: string | null;
   lastConnectedAt: string | null;
   lastError: string | null;
 }
 
-const SESSION_DIR = path.join(process.cwd(), "data", "wa-session");
+const SESSIONS_ROOT_DIR = path.join(process.cwd(), "data", "wa-sessions");
+const LEGACY_SESSION_DIR = path.join(process.cwd(), "data", "wa-session");
 
-class WhatsAppGatewayManager {
+export function sanitizeUserId(userId: string | undefined | null): string {
+  if (!userId || typeof userId !== "string") return "user-utama";
+  const clean = userId.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+  return clean || "user-utama";
+}
+
+export class WhatsAppGatewayManager {
+  public readonly userId: string;
+  private readonly sessionDir: string;
   private sock: WASocket | null = null;
   private status: WhatsAppConnectionStatus = "disconnected";
   private qrCode: string | null = null;
+  private rawQr: string | null = null;
   private phoneNumber: string | null = null;
   private pushName: string | null = null;
   private lastConnectedAt: string | null = null;
@@ -34,23 +46,26 @@ class WhatsAppGatewayManager {
   private isInitializing: boolean = false;
   private reconnectAttempts: number = 0;
 
-  constructor() {
+  constructor(userId: string = "user-utama") {
+    this.userId = sanitizeUserId(userId);
+    this.sessionDir = path.join(SESSIONS_ROOT_DIR, this.userId);
+
     // Ensure session directory exists
     try {
-      if (!fs.existsSync(SESSION_DIR)) {
-        fs.mkdirSync(SESSION_DIR, { recursive: true });
+      if (!fs.existsSync(this.sessionDir)) {
+        fs.mkdirSync(this.sessionDir, { recursive: true });
       }
     } catch (err) {
-      console.error("[WhatsApp] Failed to create session directory:", err);
+      console.error(`[WhatsApp:${this.userId}] Failed to create session directory:`, err);
     }
   }
 
   /**
-   * Check if there are existing credentials saved on disk
+   * Check if there are existing credentials saved on disk for this user
    */
   public hasSavedSession(): boolean {
     try {
-      const credsPath = path.join(SESSION_DIR, "creds.json");
+      const credsPath = path.join(this.sessionDir, "creds.json");
       return fs.existsSync(credsPath);
     } catch {
       return false;
@@ -58,10 +73,11 @@ class WhatsAppGatewayManager {
   }
 
   /**
-   * Get current connection status & info
+   * Get current connection status & info for this user
    */
   public getState(): WhatsAppState {
     return {
+      userId: this.userId,
       status: this.status,
       isConnected: this.status === "connected",
       qrCode: this.qrCode,
@@ -73,10 +89,23 @@ class WhatsAppGatewayManager {
   }
 
   /**
-   * Initialize or restore WhatsApp connection
+   * Initialize or restore WhatsApp connection for this user
    */
   public async init(forceFresh: boolean = false): Promise<WhatsAppState> {
     if (this.isInitializing) {
+      // If already initializing, wait a moment for the pending QR or connect
+      await new Promise<void>((resolve) => {
+        const check = setInterval(() => {
+          if (!this.isInitializing || this.qrCode || this.status === "connected") {
+            clearInterval(check);
+            resolve();
+          }
+        }, 150);
+        setTimeout(() => {
+          clearInterval(check);
+          resolve();
+        }, 8000);
+      });
       return this.getState();
     }
 
@@ -84,16 +113,22 @@ class WhatsAppGatewayManager {
       return this.getState();
     }
 
+    if (this.status === "qr_ready" && this.qrCode && !forceFresh) {
+      return this.getState();
+    }
+
     this.isInitializing = true;
     this.status = "connecting";
     this.lastError = null;
+    this.reconnectAttempts = 0;
 
     if (forceFresh) {
       await this.cleanupSessionFiles();
+      this.qrCode = null;
     }
 
     try {
-      const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
+      const { state, saveCreds } = await useMultiFileAuthState(this.sessionDir);
 
       // Close previous socket if open
       if (this.sock) {
@@ -133,9 +168,9 @@ class WhatsAppGatewayManager {
             });
             this.status = "qr_ready";
             this.lastError = null;
-            console.log("[WhatsApp] New QR Code generated successfully");
+            console.log(`[WhatsApp:${this.userId}] New QR Code generated successfully`);
           } catch (qrErr: any) {
-            console.error("[WhatsApp] Failed to generate QR Code data URL:", qrErr);
+            console.error(`[WhatsApp:${this.userId}] Failed to generate QR Code data URL:`, qrErr);
             this.lastError = "Gagal membuat gambar QR Code.";
           }
         }
@@ -151,12 +186,12 @@ class WhatsAppGatewayManager {
           this.phoneNumber = rawId.split(":")[0].replace(/\D/g, "");
           this.pushName = sock.user?.name || null;
 
-          console.log(`[WhatsApp] Connected successfully! Number: ${this.phoneNumber}, Name: ${this.pushName}`);
+          console.log(`[WhatsApp:${this.userId}] Connected successfully! Number: ${this.phoneNumber}, Name: ${this.pushName}`);
         } else if (connection === "close") {
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
           const isLoggedOut = statusCode === DisconnectReason.loggedOut;
 
-          console.log(`[WhatsApp] Connection closed. Status code: ${statusCode}, isLoggedOut: ${isLoggedOut}`);
+          console.log(`[WhatsApp:${this.userId}] Connection closed. Status code: ${statusCode}, isLoggedOut: ${isLoggedOut}`);
 
           if (isLoggedOut) {
             this.status = "disconnected";
@@ -165,29 +200,60 @@ class WhatsAppGatewayManager {
             this.pushName = null;
             this.lastError = "Sesi WhatsApp telah keluar. Silakan scan QR ulang.";
             await this.cleanupSessionFiles();
-          } else {
-            // Reconnection attempt
+          } else if (this.hasSavedSession()) {
+            // Reconnection attempt for authenticated user
             this.status = "connecting";
             if (this.reconnectAttempts < 5) {
               this.reconnectAttempts++;
               const delay = Math.min(this.reconnectAttempts * 3000, 15000);
-              console.log(`[WhatsApp] Will attempt reconnection in ${delay}ms (Attempt ${this.reconnectAttempts})`);
+              console.log(`[WhatsApp:${this.userId}] Reconnecting saved session in ${delay}ms (Attempt ${this.reconnectAttempts})`);
               setTimeout(() => {
                 this.init(false).catch((err) => {
-                  console.error("[WhatsApp] Auto-reconnect failed:", err);
+                  console.error(`[WhatsApp:${this.userId}] Auto-reconnect failed:`, err);
                 });
               }, delay);
             } else {
               this.status = "disconnected";
               this.lastError = "Koneksi WhatsApp terputus. Silakan sambungkan ulang.";
             }
+          } else {
+            // Unpaired session: QR expired or refreshed by WhatsApp
+            console.log(`[WhatsApp:${this.userId}] QR scan session expired/closed (status ${statusCode}). Refreshing QR...`);
+            setTimeout(() => {
+              this.init(true).catch((err) => {
+                console.error(`[WhatsApp:${this.userId}] Auto-refresh QR failed:`, err);
+              });
+            }, 800);
           }
         } else if (connection === "connecting") {
-          this.status = "connecting";
+          if (!this.qrCode) {
+            this.status = "connecting";
+          }
         }
       });
+
+      // Wait up to 10 seconds for the first QR code to be generated or connection opened
+      await new Promise<void>((resolve) => {
+        let isDone = false;
+        const finish = () => {
+          if (!isDone) {
+            isDone = true;
+            resolve();
+          }
+        };
+
+        const timer = setTimeout(finish, 10000);
+
+        const checkInterval = setInterval(() => {
+          if (this.qrCode || this.status === "connected" || this.lastError) {
+            clearInterval(checkInterval);
+            clearTimeout(timer);
+            finish();
+          }
+        }, 150);
+      });
     } catch (err: any) {
-      console.error("[WhatsApp] Error initializing socket:", err);
+      console.error(`[WhatsApp:${this.userId}] Error initializing socket:`, err);
       this.status = "disconnected";
       this.lastError = err.message || "Gagal menginisialisasi WhatsApp Gateway.";
     } finally {
@@ -198,7 +264,7 @@ class WhatsAppGatewayManager {
   }
 
   /**
-   * Disconnect and logout WhatsApp session
+   * Disconnect and logout WhatsApp session for this user
    */
   public async logout(): Promise<void> {
     try {
@@ -208,12 +274,13 @@ class WhatsAppGatewayManager {
         this.sock = null;
       }
     } catch (err) {
-      console.warn("[WhatsApp] Error during socket logout:", err);
+      console.warn(`[WhatsApp:${this.userId}] Error during socket logout:`, err);
     }
 
     await this.cleanupSessionFiles();
     this.status = "disconnected";
     this.qrCode = null;
+    this.rawQr = null;
     this.phoneNumber = null;
     this.pushName = null;
     this.lastConnectedAt = null;
@@ -222,29 +289,29 @@ class WhatsAppGatewayManager {
   }
 
   /**
-   * Clean up session files on disk
+   * Clean up session files on disk for this user
    */
   private async cleanupSessionFiles(): Promise<void> {
     try {
-      if (fs.existsSync(SESSION_DIR)) {
-        const files = fs.readdirSync(SESSION_DIR);
+      if (fs.existsSync(this.sessionDir)) {
+        const files = fs.readdirSync(this.sessionDir);
         for (const file of files) {
-          fs.rmSync(path.join(SESSION_DIR, file), { recursive: true, force: true });
+          fs.rmSync(path.join(this.sessionDir, file), { recursive: true, force: true });
         }
       }
     } catch (err) {
-      console.error("[WhatsApp] Error cleaning session files:", err);
+      console.error(`[WhatsApp:${this.userId}] Error cleaning session files:`, err);
     }
   }
 
   /**
-   * Send WhatsApp text message to any phone number
+   * Send WhatsApp text message to any phone number from this user's account
    */
   public async sendMessage(target: string, message: string): Promise<{ success: boolean; message: string; messageId?: string }> {
     if (this.status !== "connected" || !this.sock) {
       return {
         success: false,
-        message: "WhatsApp belum terhubung ke HP Anda. Silakan hubungkan dengan scan QR di menu Pengaturan WhatsApp.",
+        message: `WhatsApp untuk akun ini belum terhubung. Silakan scan QR di Pengaturan WhatsApp akun ${this.userId}.`,
       };
     }
 
@@ -282,7 +349,7 @@ class WhatsAppGatewayManager {
         messageId: sent?.key?.id || undefined,
       };
     } catch (err: any) {
-      console.error("[WhatsApp] Send message failed:", err);
+      console.error(`[WhatsApp:${this.userId}] Send message failed:`, err);
       return {
         success: false,
         message: err.message || "Gagal mengirim pesan WhatsApp. Pastikan nomor tujuan valid dan WhatsApp HP Anda online.",
@@ -291,12 +358,56 @@ class WhatsAppGatewayManager {
   }
 }
 
-export const waManager = new WhatsAppGatewayManager();
+// Multi-session pool mapping
+const activeManagers = new Map<string, WhatsAppGatewayManager>();
 
-// Automatically attempt to restore session if previously logged in
-if (waManager.hasSavedSession()) {
-  console.log("[WhatsApp] Found existing session on disk. Restoring connection...");
-  waManager.init(false).catch((err) => {
-    console.error("[WhatsApp] Initial auto-restore error:", err);
-  });
+export function getWhatsAppManager(userId?: string): WhatsAppGatewayManager {
+  const safeId = sanitizeUserId(userId);
+  let mgr = activeManagers.get(safeId);
+  if (!mgr) {
+    mgr = new WhatsAppGatewayManager(safeId);
+    activeManagers.set(safeId, mgr);
+  }
+  return mgr;
+}
+
+// Legacy export for backwards compatibility
+export const waManager = getWhatsAppManager("user-utama");
+
+// Migrate legacy single session if needed
+try {
+  const legacyCreds = path.join(LEGACY_SESSION_DIR, "creds.json");
+  const targetDir = path.join(SESSIONS_ROOT_DIR, "user-utama");
+  const targetCreds = path.join(targetDir, "creds.json");
+  if (fs.existsSync(legacyCreds) && !fs.existsSync(targetCreds)) {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const legacyFiles = fs.readdirSync(LEGACY_SESSION_DIR);
+    for (const f of legacyFiles) {
+      fs.copyFileSync(path.join(LEGACY_SESSION_DIR, f), path.join(targetDir, f));
+    }
+    console.log("[WhatsApp] Migrated legacy session to user-utama multi-session store.");
+  }
+} catch (e) {
+  console.warn("[WhatsApp] Legacy session migration note:", e);
+}
+
+// Automatically restore all existing user sessions found on disk
+try {
+  if (fs.existsSync(SESSIONS_ROOT_DIR)) {
+    const userDirs = fs.readdirSync(SESSIONS_ROOT_DIR);
+    for (const uDir of userDirs) {
+      const userCredsPath = path.join(SESSIONS_ROOT_DIR, uDir, "creds.json");
+      if (fs.existsSync(userCredsPath)) {
+        console.log(`[WhatsApp] Restoring saved WhatsApp session for user: ${uDir}...`);
+        const mgr = getWhatsAppManager(uDir);
+        mgr.init(false).catch((err) => {
+          console.error(`[WhatsApp] Error auto-restoring session for ${uDir}:`, err);
+        });
+      }
+    }
+  }
+} catch (err) {
+  console.error("[WhatsApp] Error scanning saved sessions:", err);
 }

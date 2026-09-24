@@ -4,7 +4,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
-import { waManager } from "./server/whatsapp";
+import { waManager, getWhatsAppManager, sanitizeUserId } from "./server/whatsapp";
 
 dotenv.config();
 
@@ -153,21 +153,26 @@ Berikan output dalam format JSON valid dengan struktur:
   }
 });
 
-// API: Self-Hosted WhatsApp Gateway (Option 1 - Direct QR Code Scanner & Baileys Multi-Device)
-// 1. Get current WhatsApp connection status, QR code, and linked profile
+// API: Self-Hosted WhatsApp Gateway (Multi-Device & Multi-Session per Owner Account)
+// 1. Get current WhatsApp connection status, QR code, and linked profile for a specific user
 app.get("/api/whatsapp/status", (req, res) => {
-  res.json(waManager.getState());
+  const userId = (req.query.userId as string) || (req.headers["x-user-id"] as string) || "user-utama";
+  const manager = getWhatsAppManager(userId);
+  res.json(manager.getState());
 });
 
-// 2. Start connection or generate a new QR code for scanning
+// 2. Start connection or generate a new QR code for scanning for this user
 app.post("/api/whatsapp/connect", async (req, res) => {
+  const userId = req.body?.userId || (req.headers["x-user-id"] as string) || "user-utama";
+  const manager = getWhatsAppManager(userId);
   try {
     const forceFresh = req.body?.forceFresh === true;
-    const state = await waManager.init(forceFresh);
+    const state = await manager.init(forceFresh);
     res.json(state);
   } catch (error: any) {
-    console.error("[API] Error initiating WhatsApp connect:", error);
+    console.error(`[API] Error initiating WhatsApp connect for user ${userId}:`, error);
     res.status(500).json({
+      userId,
       status: "disconnected",
       isConnected: false,
       qrCode: null,
@@ -179,17 +184,19 @@ app.post("/api/whatsapp/connect", async (req, res) => {
   }
 });
 
-// 3. Disconnect / logout WhatsApp session
+// 3. Disconnect / logout WhatsApp session for this user
 app.post("/api/whatsapp/disconnect", async (req, res) => {
+  const userId = req.body?.userId || (req.headers["x-user-id"] as string) || "user-utama";
+  const manager = getWhatsAppManager(userId);
   try {
-    await waManager.logout();
+    await manager.logout();
     res.json({
       success: true,
       message: "Perangkat WhatsApp berhasil diputuskan.",
-      state: waManager.getState(),
+      state: manager.getState(),
     });
   } catch (error: any) {
-    console.error("[API] Error disconnecting WhatsApp:", error);
+    console.error(`[API] Error disconnecting WhatsApp for user ${userId}:`, error);
     res.status(500).json({
       success: false,
       message: error.message || "Gagal memutuskan sambungan WhatsApp.",
@@ -197,8 +204,10 @@ app.post("/api/whatsapp/disconnect", async (req, res) => {
   }
 });
 
-// 4. Send WhatsApp message directly through the linked session (Background & Automatic)
+// 4. Send WhatsApp message directly through this user's linked session
 app.post("/api/whatsapp/send", async (req, res) => {
+  const userId = req.body?.userId || (req.headers["x-user-id"] as string) || "user-utama";
+  const manager = getWhatsAppManager(userId);
   try {
     const { target, message } = req.body;
     if (!target || !message) {
@@ -208,14 +217,14 @@ app.post("/api/whatsapp/send", async (req, res) => {
       });
     }
 
-    const result = await waManager.sendMessage(target, message);
+    const result = await manager.sendMessage(target, message);
     if (!result.success) {
       return res.status(400).json(result);
     }
 
     res.json(result);
   } catch (error: any) {
-    console.error("[API] Error sending WhatsApp message:", error);
+    console.error(`[API] Error sending WhatsApp message for user ${userId}:`, error);
     res.status(500).json({
       success: false,
       message: error.message || "Terjadi kesalahan internal saat mengirim pesan WhatsApp.",

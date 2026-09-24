@@ -1,14 +1,16 @@
 /**
- * Self-Hosted WhatsApp Gateway Utilities (Option 1 - Direct Multi-Device QR Scanner)
- * No third-party API (Fonnte/Bablast) required. Connects directly to user's phone.
+ * Self-Hosted WhatsApp Gateway Utilities (Multi-Session per Owner Account)
+ * Direct Baileys Multi-Device QR Scanner per user/owner.
  */
 
 export type WhatsAppConnectionStatus = 'disconnected' | 'connecting' | 'qr_ready' | 'connected';
 
 export interface WhatsAppState {
+  userId?: string;
   status: WhatsAppConnectionStatus;
   isConnected: boolean;
   qrCode: string | null;
+  rawQr?: string | null;
   phoneNumber: string | null;
   pushName: string | null;
   lastConnectedAt: string | null;
@@ -25,11 +27,15 @@ export interface GatewaySendResult {
 }
 
 /**
- * Fetches the current WhatsApp connection status from the backend
+ * Fetches the current WhatsApp connection status for a specific user from the backend
  */
-export async function getWhatsAppStatus(): Promise<WhatsAppState> {
+export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<WhatsAppState> {
   try {
-    const res = await fetch('/api/whatsapp/status');
+    const res = await fetch(`/api/whatsapp/status?userId=${encodeURIComponent(userId)}`, {
+      headers: {
+        'x-user-id': userId,
+      },
+    });
     if (!res.ok) {
       throw new Error(`Server returned HTTP ${res.status}`);
     }
@@ -37,6 +43,7 @@ export async function getWhatsAppStatus(): Promise<WhatsAppState> {
     return data;
   } catch (err: any) {
     return {
+      userId,
       status: 'disconnected',
       isConnected: false,
       qrCode: null,
@@ -49,21 +56,23 @@ export async function getWhatsAppStatus(): Promise<WhatsAppState> {
 }
 
 /**
- * Initializes or starts WhatsApp connection / generates a fresh QR code
+ * Initializes or starts WhatsApp connection / generates a fresh QR code for a specific user
  */
-export async function connectWhatsApp(forceFresh: boolean = false): Promise<WhatsAppState> {
+export async function connectWhatsApp(userId: string = 'user-utama', forceFresh: boolean = false): Promise<WhatsAppState> {
   try {
     const res = await fetch('/api/whatsapp/connect', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-user-id': userId,
       },
-      body: JSON.stringify({ forceFresh }),
+      body: JSON.stringify({ userId, forceFresh }),
     });
     const data: WhatsAppState = await res.json();
     return data;
   } catch (err: any) {
     return {
+      userId,
       status: 'disconnected',
       isConnected: false,
       qrCode: null,
@@ -76,12 +85,17 @@ export async function connectWhatsApp(forceFresh: boolean = false): Promise<What
 }
 
 /**
- * Disconnects and logs out the linked WhatsApp device
+ * Disconnects and logs out the linked WhatsApp device for a specific user
  */
-export async function disconnectWhatsApp(): Promise<{ success: boolean; message: string }> {
+export async function disconnectWhatsApp(userId: string = 'user-utama'): Promise<{ success: boolean; message: string }> {
   try {
     const res = await fetch('/api/whatsapp/disconnect', {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+      },
+      body: JSON.stringify({ userId }),
     });
     const data = await res.json();
     return {
@@ -100,16 +114,20 @@ export async function disconnectWhatsApp(): Promise<{ success: boolean; message:
  * Sends a message automatically through the user's linked WhatsApp session
  */
 export async function sendViaActiveGateway(params: {
+  userId?: string;
   target: string;
   message: string;
 }): Promise<GatewaySendResult> {
+  const userId = params.userId || 'user-utama';
   try {
     const res = await fetch('/api/whatsapp/send', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-user-id': userId,
       },
       body: JSON.stringify({
+        userId,
         target: params.target,
         message: params.message,
       }),
@@ -148,7 +166,7 @@ export function getGatewayStatus() {
   return {
     activeProvider: 'direct-wa',
     hasActiveKey: true,
-    activeProviderName: 'WhatsApp QR Langsung (Self-Hosted)',
+    activeProviderName: 'WhatsApp QR Langsung (Multi-Akun)',
   };
 }
 

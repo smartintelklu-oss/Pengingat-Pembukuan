@@ -11,7 +11,10 @@ import {
   FileText, 
   Sparkles,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Plus,
+  Trash2,
+  ShieldCheck
 } from 'lucide-react';
 import { ScheduledWhatsApp, WhatsAppTextType, RecurrenceType } from '../types';
 import { 
@@ -21,11 +24,17 @@ import {
   generateScheduledWhatsAppLink
 } from '../utils/whatsapp';
 
+interface RecipientItem {
+  name: string;
+  phone: string;
+}
+
 interface WhatsAppModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (data: Omit<ScheduledWhatsApp, 'id' | 'createdAt'>) => void;
+  onSave: (data: Omit<ScheduledWhatsApp, 'id' | 'createdAt'> | Omit<ScheduledWhatsApp, 'id' | 'createdAt'>[]) => void;
   editingItem?: ScheduledWhatsApp | null;
+  defaultAntiSpamMinutes?: 5 | 10 | 20 | 30;
 }
 
 export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
@@ -33,9 +42,10 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
   onClose,
   onSave,
   editingItem,
+  defaultAntiSpamMinutes = 10,
 }) => {
-  const [recipientName, setRecipientName] = useState('');
-  const [whatsappNumber, setWhatsappNumber] = useState('');
+  const [recipients, setRecipients] = useState<RecipientItem[]>([{ name: '', phone: '' }]);
+  const [sendIntervalMinutes, setSendIntervalMinutes] = useState<5 | 10 | 20 | 30>(defaultAntiSpamMinutes);
   const [textType, setTextType] = useState<WhatsAppTextType>('pengingat');
   const [messageContent, setMessageContent] = useState('');
   const [scheduledDate, setScheduledDate] = useState('');
@@ -48,8 +58,7 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
 
   useEffect(() => {
     if (editingItem) {
-      setRecipientName(editingItem.recipientName);
-      setWhatsappNumber(editingItem.whatsappNumber);
+      setRecipients([{ name: editingItem.recipientName, phone: editingItem.whatsappNumber }]);
       setTextType(editingItem.textType);
       setMessageContent(editingItem.messageContent);
       setScheduledDate(editingItem.scheduledDate);
@@ -58,8 +67,8 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
       setValidationError('');
     } else {
       // New item defaults
-      setRecipientName('');
-      setWhatsappNumber('');
+      setRecipients([{ name: '', phone: '' }]);
+      setSendIntervalMinutes(defaultAntiSpamMinutes);
       setTextType('pengingat');
       setMessageContent(WHATSAPP_TEXT_TEMPLATES.pengingat.sample(''));
       setScheduledDate(todayStr);
@@ -77,34 +86,55 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Add recipient row (name + phone)
+  const handleAddRecipient = () => {
+    setRecipients(prev => [...prev, { name: '', phone: '' }]);
+  };
+
+  // Remove recipient row
+  const handleRemoveRecipient = (index: number) => {
+    if (recipients.length <= 1) return;
+    setRecipients(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Update specific recipient field
+  const handleUpdateRecipient = (index: number, field: 'name' | 'phone', value: string) => {
+    setRecipients(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
+  };
+
   // Handle changing text type: offer template
   const handleTextTypeChange = (newType: WhatsAppTextType) => {
     setTextType(newType);
-    const template = WHATSAPP_TEXT_TEMPLATES[newType].sample(recipientName);
+    const firstName = recipients[0]?.name || '';
+    const template = WHATSAPP_TEXT_TEMPLATES[newType].sample(firstName);
     // If message is empty or matches an existing template, update it
-    if (!messageContent.trim() || Object.values(WHATSAPP_TEXT_TEMPLATES).some(t => t.sample(recipientName) === messageContent || t.sample('') === messageContent)) {
+    if (!messageContent.trim() || Object.values(WHATSAPP_TEXT_TEMPLATES).some(t => t.sample(firstName) === messageContent || t.sample('') === messageContent)) {
       setMessageContent(template);
     }
   };
 
   // Helper to apply template explicitly
   const handleApplyTemplate = () => {
-    const template = WHATSAPP_TEXT_TEMPLATES[textType].sample(recipientName);
+    const firstName = recipients[0]?.name || '';
+    const template = WHATSAPP_TEXT_TEMPLATES[textType].sample(firstName);
     setMessageContent(template);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!recipientName.trim()) {
-      setValidationError('Nama penerima wajib diisi');
-      return;
-    }
-
-    const cleanPhone = formatPhoneNumber(whatsappNumber);
-    if (!cleanPhone || cleanPhone.length < 8) {
-      setValidationError('Nomor WhatsApp harus valid (minimal 8 digit, diawali 08... atau 62...)');
-      return;
+    // Validate that each recipient has a name and valid phone
+    for (let i = 0; i < recipients.length; i++) {
+      const r = recipients[i];
+      if (!r.name.trim()) {
+        setValidationError(`Nama penerima untuk nomor #${i + 1} wajib diisi`);
+        return;
+      }
+      const cleanPhone = formatPhoneNumber(r.phone);
+      if (!cleanPhone || cleanPhone.length < 8) {
+        setValidationError(`Nomor WhatsApp #${i + 1} (${r.name.trim()}) harus valid (minimal 8 digit, diawali 08... atau 62...)`);
+        return;
+      }
     }
 
     if (!messageContent.trim()) {
@@ -117,19 +147,50 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
       return;
     }
 
-    const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
+    const [y, m, d] = scheduledDate.split('-').map(Number);
+    const [h, min] = scheduledTime.split(':').map(Number);
 
-    onSave({
-      recipientName: recipientName.trim(),
-      whatsappNumber: cleanPhone,
-      textType,
-      messageContent: messageContent.trim(),
-      scheduledDate,
-      scheduledTime,
-      scheduledDateTime,
-      recurrence,
-      status: editingItem ? editingItem.status : 'pending',
-    });
+    if (recipients.length === 1) {
+      const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`).toISOString();
+      const first = recipients[0];
+      const cleanPhone = formatPhoneNumber(first.phone);
+      const personalized = messageContent.replace(/\{nama\}/gi, first.name.trim());
+
+      onSave({
+        recipientName: first.name.trim(),
+        whatsappNumber: cleanPhone,
+        textType,
+        messageContent: personalized.trim(),
+        scheduledDate,
+        scheduledTime,
+        scheduledDateTime,
+        recurrence,
+        status: editingItem ? editingItem.status : 'pending',
+      });
+    } else {
+      // Multiple recipients: staggered schedule based on sendIntervalMinutes
+      const bulkItems = recipients.map((r, idx) => {
+        const dt = new Date(y, m - 1, d, h, min);
+        dt.setMinutes(dt.getMinutes() + (idx * sendIntervalMinutes));
+        const sDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        const sTime = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+        const cleanPhone = formatPhoneNumber(r.phone);
+        const personalized = messageContent.replace(/\{nama\}/gi, r.name.trim());
+
+        return {
+          recipientName: r.name.trim(),
+          whatsappNumber: cleanPhone,
+          textType,
+          messageContent: personalized.trim(),
+          scheduledDate: sDate,
+          scheduledTime: sTime,
+          scheduledDateTime: dt.toISOString(),
+          recurrence: 'none' as RecurrenceType,
+          status: 'pending' as const,
+        };
+      });
+      onSave(bulkItems);
+    }
 
     onClose();
   };
@@ -137,8 +198,8 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
   // Quick preview link object
   const previewItem: ScheduledWhatsApp = {
     id: 'preview',
-    recipientName: recipientName || 'Penerima',
-    whatsappNumber: whatsappNumber || '',
+    recipientName: recipients[0]?.name || 'Penerima',
+    whatsappNumber: recipients[0]?.phone || '',
     textType,
     messageContent: messageContent || '',
     scheduledDate,
@@ -191,51 +252,184 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
             </div>
           )}
 
-          {/* Section 1: Kontak Penerima (Nama & Nomor WhatsApp) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Input Nama Penerima */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center space-x-1.5">
-                <User className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Nama Penerima <span className="text-rose-500">*</span></span>
-              </label>
-              <input
-                id="input-wa-name"
-                type="text"
-                required
-                value={recipientName}
-                onChange={(e) => setRecipientName(e.target.value)}
-                placeholder="Contoh: Budi Santoso / Bu Mega"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-              />
+          {/* Section 1: Daftar Penerima & Nomor WhatsApp */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-1.5">
+                  <User className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Daftar Penerima &amp; Nomor WhatsApp <span className="text-rose-500">*</span></span>
+                  {recipients.length > 1 && (
+                    <span className="text-3xs font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200 ml-1">
+                      {recipients.length} Nomor
+                    </span>
+                  )}
+                </label>
+                <p className="text-3xs text-slate-400 mt-0.5">
+                  Setiap nomor memiliki nama penerimanya masing-masing
+                </p>
+              </div>
+
+              {!editingItem && (
+                <button
+                  id="btn-add-recipient-row"
+                  type="button"
+                  onClick={handleAddRecipient}
+                  className="inline-flex items-center space-x-1 text-2xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-xl border border-emerald-300 shadow-2xs transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ Tambah Nomor</span>
+                </button>
+              )}
             </div>
 
-            {/* Input Nomor WhatsApp */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 flex items-center space-x-1.5">
-                <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Nomor WhatsApp <span className="text-rose-500">*</span></span>
-              </label>
-              <div className="relative">
-                <input
-                  id="input-wa-number"
-                  type="tel"
-                  required
-                  value={whatsappNumber}
-                  onChange={(e) => setWhatsappNumber(e.target.value)}
-                  placeholder="081234567890 / 62812..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs sm:text-sm bg-slate-50/50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                />
-                {whatsappNumber && (
-                  <span className="absolute right-3 top-2.5 text-3xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                    {displayPhoneNumber(whatsappNumber)}
+            {/* List of Recipient Rows */}
+            <div className="space-y-3">
+              {recipients.map((item, idx) => (
+                <div 
+                  key={idx}
+                  className="p-3.5 rounded-2xl bg-slate-50/90 border border-slate-200/90 space-y-2.5 transition-all"
+                >
+                  {/* Row Header if multiple recipients */}
+                  {recipients.length > 1 && (
+                    <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/60">
+                      <span className="text-3xs font-extrabold uppercase tracking-wider text-emerald-800 bg-emerald-100/90 px-2 py-0.5 rounded-md border border-emerald-200">
+                        Nomor Penerima #{idx + 1}
+                      </span>
+                      {!editingItem && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveRecipient(idx)}
+                          className="inline-flex items-center space-x-1 text-3xs font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                          title="Hapus nomor penerima ini"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Hapus</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Input Nama Penerima untuk nomor ini */}
+                    <div>
+                      <label className="block text-3xs font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center space-x-1">
+                        <User className="w-3 h-3 text-slate-400" />
+                        <span>Nama Penerima <span className="text-rose-500">*</span></span>
+                      </label>
+                      <input
+                        id={`input-recipient-name-${idx}`}
+                        type="text"
+                        required
+                        value={item.name}
+                        onChange={(e) => handleUpdateRecipient(idx, 'name', e.target.value)}
+                        placeholder="Contoh: Budi Santoso / Bu Mega"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                      />
+                    </div>
+
+                    {/* Input Nomor WhatsApp untuk penerima ini */}
+                    <div>
+                      <label className="block text-3xs font-bold text-slate-700 uppercase tracking-wider mb-1 flex items-center space-x-1">
+                        <Phone className="w-3 h-3 text-slate-400" />
+                        <span>Nomor WhatsApp <span className="text-rose-500">*</span></span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          id={`input-wa-number-${idx}`}
+                          type="tel"
+                          required
+                          value={item.phone}
+                          onChange={(e) => handleUpdateRecipient(idx, 'phone', e.target.value)}
+                          placeholder="081234567890 / 62812..."
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs sm:text-sm bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                        />
+                        {item.phone && (
+                          <span className="absolute right-2.5 top-2 text-3xs font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            {displayPhoneNumber(item.phone)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-3xs text-slate-400">
+              Format nomor otomatis: 08xx atau 628xx
+            </p>
+
+            {/* Jeda Pengiriman Pesan Antara Nomor (Anti-Spam) jika lebih dari 1 nomor */}
+            {recipients.length > 1 && (
+              <div className="p-3.5 rounded-2xl bg-amber-50/70 border border-amber-200/80 space-y-2.5 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold text-slate-800">
+                      Jeda Pengiriman Antara Nomor (Anti-Spam) <span className="text-rose-500">*</span>
+                    </span>
+                  </div>
+                  <span className="text-3xs font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                    Mencegah Spam WA
                   </span>
+                </div>
+                
+                <p className="text-3xs text-slate-500 leading-relaxed">
+                  Pilih jeda waktu pengiriman pesan antar nomor untuk menghindari risiko spam atau pemblokiran nomor WhatsApp:
+                </p>
+
+                {/* Tombol Pilihan Jeda: 5 Menit, 10 Menit, 20 Menit, 30 Menit */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {([
+                    { value: 5, label: '5 Menit', note: 'Kecepatan Sedang' },
+                    { value: 10, label: '10 Menit', note: 'Direkomendasikan' },
+                    { value: 20, label: '20 Menit', note: 'Ekstra Aman' },
+                    { value: 30, label: '30 Menit', note: 'Maksimal Anti-Spam' },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setSendIntervalMinutes(opt.value)}
+                      className={`p-2.5 rounded-xl text-center border transition-all cursor-pointer ${
+                        sendIntervalMinutes === opt.value
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      <div className="text-xs sm:text-sm font-extrabold">{opt.label}</div>
+                      <div className={`text-3xs mt-0.5 ${sendIntervalMinutes === opt.value ? 'text-emerald-100' : 'text-slate-400'}`}>
+                        {opt.note}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Simulasi Waktu Pengiriman Bertahap */}
+                {scheduledDate && scheduledTime && (
+                  <div className="pt-2 border-t border-slate-200/60">
+                    <div className="text-3xs font-bold text-slate-600 mb-1 flex items-center space-x-1">
+                      <Clock className="w-3 h-3 text-emerald-600" />
+                      <span>Simulasi Jadwal Bertahap ({recipients.length} Nomor):</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 text-3xs text-slate-600">
+                      {recipients.map((r, i) => {
+                        const [y, m, d] = scheduledDate.split('-').map(Number);
+                        const [h, min] = scheduledTime.split(':').map(Number);
+                        const dt = new Date(y, m - 1, d, h, min);
+                        dt.setMinutes(dt.getMinutes() + (i * sendIntervalMinutes));
+                        const timeStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+                        return (
+                          <span key={i} className="px-2 py-1 rounded-lg bg-white border border-slate-200 font-mono shadow-2xs">
+                            #{i + 1} {r.name ? `(${r.name})` : ''}: <b className="text-emerald-700">{timeStr} WIB</b>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
               </div>
-              <p className="text-3xs text-slate-400 mt-1">
-                Format Indonesia otomatis: 08xx atau 628xx
-              </p>
-            </div>
+            )}
           </div>
 
           {/* Section 2: Jenis Teks & Pengulangan */}
@@ -349,7 +543,7 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
               className="w-full px-3.5 py-2.5 rounded-2xl border border-slate-200 text-xs sm:text-sm bg-slate-50/50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-sans leading-relaxed"
             />
             <div className="flex items-center justify-between text-3xs text-slate-400 mt-1">
-              <span>Tips: Format WhatsApp didukung (*tebal*, _miring_, emoji)</span>
+              <span>Tips: Gunakan tag <code className="bg-slate-100 text-emerald-700 px-1 py-0.5 rounded font-mono font-bold">{"{nama}"}</code> agar pesan otomatis menyebut nama masing-masing penerima (*tebal*, _miring_, emoji didukung)</span>
               <span>{messageContent.length} karakter</span>
             </div>
           </div>
@@ -361,7 +555,7 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
             </span>
             <div className="max-w-md bg-white rounded-2xl rounded-tl-xs p-3.5 shadow-xs border border-emerald-100/50 relative">
               <p className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
-                {messageContent || '(Teks pesan akan tampil di sini)'}
+                {(messageContent ? messageContent.replace(/\{nama\}/gi, recipients[0]?.name || 'Nama Penerima') : '(Teks pesan akan tampil di sini)')}
               </p>
               <div className="flex items-center justify-end space-x-1 text-3xs text-slate-400 mt-1.5">
                 <span>{scheduledTime}</span>
@@ -385,7 +579,13 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-emerald-500/20 transition-all flex items-center justify-center space-x-2 cursor-pointer"
             >
               <Send className="w-4 h-4" />
-              <span>{editingItem ? 'Simpan Perubahan' : 'Jadwalkan WhatsApp'}</span>
+              <span>
+                {editingItem 
+                  ? 'Simpan Perubahan' 
+                  : (recipients.length > 1 
+                      ? `Jadwalkan ${recipients.length} Pesan WhatsApp` 
+                      : 'Jadwalkan WhatsApp')}
+              </span>
             </button>
           </div>
 

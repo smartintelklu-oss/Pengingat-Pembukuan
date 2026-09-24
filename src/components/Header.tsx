@@ -87,10 +87,10 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Brand Identity with Glass Glow Effect */}
             <div 
               onClick={() => setActiveTab('home')} 
-              className="flex items-center space-x-3.5 cursor-pointer select-none group"
+              className="flex items-center space-x-3 sm:space-x-3.5 cursor-pointer select-none group"
               title="Kembali ke Beranda"
             >
-              <div className="relative">
+              <div className="relative shrink-0">
                 <div className="absolute -inset-0.5 bg-gradient-to-tr from-emerald-500 to-teal-400 rounded-2xl blur-xs opacity-50 group-hover:opacity-75 transition-opacity" />
                 <div className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-sm border border-white/30">
                   <CalendarClock className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -277,42 +277,6 @@ export const Header: React.FC<HeaderProps> = ({
                   <BellRing className="w-3.5 h-3.5 mr-1.5 text-amber-600 animate-bounce" />
                   <span className="hidden lg:inline">Aktifkan Notifikasi</span>
                   <span className="lg:hidden">Notif</span>
-                </button>
-              )}
-
-              {/* User Account / Profile Switcher Button */}
-              {onOpenAccountModal && (
-                <button
-                  id="btn-user-account-switcher"
-                  type="button"
-                  onClick={onOpenAccountModal}
-                  className={`inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-bold border backdrop-blur-md transition-all cursor-pointer shadow-2xs ${
-                    currentUser?.isCloudUser 
-                      ? 'bg-emerald-50/80 hover:bg-emerald-100/90 text-emerald-900 border-emerald-300/80' 
-                      : 'bg-indigo-50/80 hover:bg-indigo-100/90 text-indigo-900 border-indigo-200/80'
-                  }`}
-                  title="Ganti Akun Pengguna / Sinkronisasi Cloud"
-                >
-                  {currentUser?.photoURL ? (
-                    <img 
-                      src={currentUser.photoURL} 
-                      alt={currentUser.displayName} 
-                      className="w-5 h-5 rounded-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">
-                      {currentUser ? currentUser.displayName.charAt(0).toUpperCase() : <User className="w-3 h-3" />}
-                    </div>
-                  )}
-                  <span className="hidden sm:inline truncate max-w-[110px]">
-                    {currentUser?.displayName || 'Akun'}
-                  </span>
-                  {currentUser?.isCloudUser ? (
-                    <Cloud className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                  ) : (
-                    <Users className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                  )}
                 </button>
               )}
 

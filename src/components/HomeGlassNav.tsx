@@ -4,7 +4,6 @@ import {
   WalletCards, 
   MessageSquare,
   Sparkles, 
-  Volume2, 
   ArrowRight, 
   CheckCircle2, 
   Repeat,
@@ -15,14 +14,7 @@ import {
   ChevronRight,
   TrendingUp,
   Plus,
-  Settings,
-  Key,
-  User,
-  Users,
-  Cloud,
-  LogIn,
-  ShieldCheck,
-  Briefcase
+  Key
 } from 'lucide-react';
 import { AppTab, ReminderTask, Transaction, ScheduledWhatsApp, AppUser } from '../types';
 import { playNotificationChime } from '../utils/audio';
@@ -89,63 +81,7 @@ export const HomeGlassNav: React.FC<HomeGlassNavProps> = ({
 
           {/* Quick Utility Actions */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            {/* Quick Access to Login Page for Owner / Staff */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('login')}
-              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white border border-slate-800 shadow-xs hover:shadow-sm text-xs font-bold transition-all cursor-pointer"
-              title="Buka Halaman Masuk Akun Pemilik & Staf"
-            >
-              <LogIn className="w-4 h-4 text-emerald-400" />
-              <span>Masuk Akun (Pemilik/Staf)</span>
-            </button>
-
-            {onOpenAccountModal && (
-              <button
-                type="button"
-                onClick={onOpenAccountModal}
-                className={`inline-flex items-center space-x-2 px-4 py-2.5 rounded-2xl border backdrop-blur-md shadow-2xs hover:shadow-xs text-xs font-bold transition-all cursor-pointer ${
-                  currentUser?.isCloudUser
-                    ? 'bg-emerald-50/90 hover:bg-emerald-100 text-emerald-900 border-emerald-300/80'
-                    : 'bg-indigo-50/90 hover:bg-indigo-100 text-indigo-900 border-indigo-200/80'
-                }`}
-                title="Ganti Akun Pengguna / Sinkronisasi Firebase Cloud"
-              >
-                {currentUser?.role === 'owner' ? (
-                  <ShieldCheck className="w-4 h-4 text-amber-600" />
-                ) : (
-                  <Briefcase className="w-4 h-4 text-teal-600" />
-                )}
-                <span>Akun: <strong>{currentUser?.displayName || 'Profil'}</strong></span>
-                <span className={`px-1.5 py-0.5 rounded-full text-3xs font-extrabold ${
-                  currentUser?.role === 'owner' ? 'bg-amber-100 text-amber-800' : 'bg-teal-100 text-teal-800'
-                }`}>
-                  {currentUser?.role === 'owner' ? 'Pemilik' : 'Staf'}
-                </span>
-                {currentUser?.isCloudUser && (
-                  <span className="px-1.5 py-0.5 rounded-full text-3xs font-extrabold bg-emerald-600 text-white">Cloud</span>
-                )}
-              </button>
-            )}
             <PWAInstallButton />
-            <button
-              type="button"
-              onClick={onSimulateAlarm}
-              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-white/80 hover:bg-white text-slate-700 hover:text-emerald-800 border border-white/90 backdrop-blur-md shadow-2xs hover:shadow-xs text-xs font-bold transition-all cursor-pointer"
-              title="Simulasi Alarm Pengingat Suara AI Instan"
-            >
-              <Volume2 className="w-4 h-4 text-emerald-600" />
-              <span>Tes Alarm Suara AI</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('settings')}
-              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-500/30 shadow-xs hover:shadow-sm text-xs font-bold transition-all cursor-pointer"
-              title="Buka Halaman Pengaturan & Tautkan WhatsApp"
-            >
-              <Settings className="w-4 h-4" />
-              <span>Tautkan WhatsApp (Scan QR)</span>
-            </button>
           </div>
         </div>
       </div>

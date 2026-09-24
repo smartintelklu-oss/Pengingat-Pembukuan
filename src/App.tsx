@@ -21,14 +21,17 @@ import {
   loadScopedTransactions,
   saveScopedTransactions,
   loadScopedScheduledWhatsApp,
-  saveScopedScheduledWhatsApp
+  saveScopedScheduledWhatsApp,
+  loadScopedUserSettings,
+  saveScopedUserSettings
 } from './utils/storage';
-import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp, AppUser, UserRole } from './types';
+import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp, AppUser, UserRole, UserSettings } from './types';
 import { 
   subscribeUserReminders, 
   subscribeUserLedgers, 
   subscribeUserTransactions, 
   subscribeUserScheduledWhatsApp,
+  subscribeUserSettings,
   syncRemindersToCloud,
   deleteReminderFromCloud,
   syncLedgersToCloud,
@@ -37,6 +40,7 @@ import {
   deleteTransactionFromCloud,
   syncScheduledWhatsAppToCloud,
   deleteScheduledWhatsAppFromCloud,
+  syncSettingsToCloud,
   auth
 } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -61,6 +65,7 @@ import { sendScheduledWhatsApp, getNextRecurrenceDate } from './utils/whatsapp';
 import { sendViaActiveGateway } from './utils/whatsappGateway';
 import { Bell, Sparkles, Plus, Volume2 } from 'lucide-react';
 import { AppTab } from './types';
+import { useAndroidBackHandler } from './utils/useAndroidBackHandler';
 
 export default function App() {
   // Navigation: Defaults to modern glass home dashboard
@@ -89,8 +94,10 @@ export default function App() {
     const activeId = loadActiveUserId();
     return profiles.find(p => p.id === activeId) || profiles[0] || {
       id: 'user-utama',
-      displayName: 'Akun Utama (Pemilik)',
-      email: 'pemilik@usaha.id',
+      displayName: 'Sigit Raharjo (Pemilik)',
+      email: 'sigit.raharjo@usaha.id',
+      role: 'owner',
+      pin: '1234',
       isCloudUser: false,
       createdAt: new Date().toISOString(),
     };
@@ -118,10 +125,112 @@ export default function App() {
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [editingWhatsApp, setEditingWhatsApp] = useState<ScheduledWhatsApp | null>(null);
 
+  // User Settings state (Isolated per owner/user account)
+  const [userSettings, setUserSettings] = useState<UserSettings>(() => loadScopedUserSettings(activeUserId));
+
   // Modals & Triggers
   const [voicePreviewTask, setVoicePreviewTask] = useState<ReminderTask | null>(null);
   const [triggeredAlarmTask, setTriggeredAlarmTask] = useState<ReminderTask | null>(null);
   const [isAiAnalysisModalOpen, setIsAiAnalysisModalOpen] = useState(false);
+
+  // Android Hardware / Gesture / Browser Back Button Hook
+  const {
+    showExitToast,
+    handleOpenModal,
+    handleCloseModal,
+    handleNavigateTab,
+    handleGoBack,
+  } = useAndroidBackHandler({
+    activeTab,
+    setActiveTab,
+    modalCloseHandlers: {
+      account: () => setIsAccountModalOpen(false),
+      reminder: () => {
+        setIsReminderModalOpen(false);
+        setEditingReminder(null);
+      },
+      transaction: () => {
+        setIsTransactionModalOpen(false);
+        setEditingTransaction(null);
+      },
+      manage_ledgers: () => setIsManageLedgersModalOpen(false),
+      voice_preview: () => setVoicePreviewTask(null),
+      alarm_alert: () => setTriggeredAlarmTask(null),
+      ai_analysis: () => setIsAiAnalysisModalOpen(false),
+      whatsapp: () => {
+        setIsWhatsAppModalOpen(false);
+        setEditingWhatsApp(null);
+      },
+    },
+  });
+
+  // Keep triggered alarm and voice preview synchronized with Android back handler
+  useEffect(() => {
+    if (triggeredAlarmTask) {
+      handleOpenModal('alarm_alert', () => {});
+    }
+  }, [triggeredAlarmTask, handleOpenModal]);
+
+  useEffect(() => {
+    if (voicePreviewTask) {
+      handleOpenModal('voice_preview', () => {});
+    }
+  }, [voicePreviewTask, handleOpenModal]);
+
+  // Modal open & close action helpers for seamless Android back navigation
+  const openAccountModal = () => handleOpenModal('account', () => setIsAccountModalOpen(true));
+  const closeAccountModal = () => handleCloseModal('account', () => setIsAccountModalOpen(false));
+
+  const openAddReminder = () => handleOpenModal('reminder', () => {
+    setEditingReminder(null);
+    setIsReminderModalOpen(true);
+  });
+  const openEditReminder = (task: ReminderTask) => handleOpenModal('reminder', () => {
+    setEditingReminder(task);
+    setIsReminderModalOpen(true);
+  });
+  const closeReminderModal = () => handleCloseModal('reminder', () => {
+    setIsReminderModalOpen(false);
+    setEditingReminder(null);
+  });
+
+  const openAddTransaction = () => handleOpenModal('transaction', () => {
+    setEditingTransaction(null);
+    setIsTransactionModalOpen(true);
+  });
+  const openEditTransaction = (tx: Transaction) => handleOpenModal('transaction', () => {
+    setEditingTransaction(tx);
+    setIsTransactionModalOpen(true);
+  });
+  const closeTransactionModal = () => handleCloseModal('transaction', () => {
+    setIsTransactionModalOpen(false);
+    setEditingTransaction(null);
+  });
+
+  const openManageLedgersModal = () => handleOpenModal('manage_ledgers', () => setIsManageLedgersModalOpen(true));
+  const closeManageLedgersModal = () => handleCloseModal('manage_ledgers', () => setIsManageLedgersModalOpen(false));
+
+  const openVoicePreviewModal = (task: ReminderTask) => handleOpenModal('voice_preview', () => setVoicePreviewTask(task));
+  const closeVoicePreviewModal = () => handleCloseModal('voice_preview', () => setVoicePreviewTask(null));
+
+  const openAlarmAlertModal = (task: ReminderTask) => handleOpenModal('alarm_alert', () => setTriggeredAlarmTask(task));
+  const closeAlarmAlertModal = () => handleCloseModal('alarm_alert', () => setTriggeredAlarmTask(null));
+
+  const openAiAnalysisModal = () => handleOpenModal('ai_analysis', () => setIsAiAnalysisModalOpen(true));
+  const closeAiAnalysisModal = () => handleCloseModal('ai_analysis', () => setIsAiAnalysisModalOpen(false));
+
+  const openAddWhatsApp = () => handleOpenModal('whatsapp', () => {
+    setEditingWhatsApp(null);
+    setIsWhatsAppModalOpen(true);
+  });
+  const openEditWhatsApp = (item: ScheduledWhatsApp) => handleOpenModal('whatsapp', () => {
+    setEditingWhatsApp(item);
+    setIsWhatsAppModalOpen(true);
+  });
+  const closeWhatsAppModal = () => handleCloseModal('whatsapp', () => {
+    setIsWhatsAppModalOpen(false);
+    setEditingWhatsApp(null);
+  });
 
   // Synchronize Active User ID to LocalStorage
   useEffect(() => {
@@ -167,12 +276,14 @@ export default function App() {
     const scopedLedg = loadScopedLedgers(activeUserId);
     const scopedTx = loadScopedTransactions(activeUserId);
     const scopedWa = loadScopedScheduledWhatsApp(activeUserId);
+    const scopedSettings = loadScopedUserSettings(activeUserId);
 
     setReminders(scopedRem);
     setLedgers(scopedLedg);
     setActiveLedgerId(scopedLedg[0]?.id || 'ledger-usaha');
     setTransactions(scopedTx);
     setScheduledWhatsApp(scopedWa);
+    setUserSettings(scopedSettings);
 
     // If active user is Cloud User (Firebase Auth), establish live real-time listeners!
     if (currentUser.isCloudUser) {
@@ -200,12 +311,19 @@ export default function App() {
           saveScopedScheduledWhatsApp(activeUserId, cloudWa);
         }
       });
+      const unsubSettings = subscribeUserSettings(activeUserId, (cloudSettings) => {
+        if (cloudSettings) {
+          setUserSettings(cloudSettings);
+          saveScopedUserSettings(activeUserId, cloudSettings);
+        }
+      });
 
       return () => {
         unsubRem();
         unsubLedg();
         unsubTx();
         unsubWa();
+        unsubSettings();
       };
     }
   }, [activeUserId, currentUser.isCloudUser]);
@@ -241,6 +359,15 @@ export default function App() {
       syncScheduledWhatsAppToCloud(activeUserId, scheduledWhatsApp);
     }
   }, [scheduledWhatsApp, activeUserId, currentUser.isCloudUser]);
+
+  // Handler for updating user settings per owner
+  const handleUpdateUserSettings = (newSettings: UserSettings) => {
+    setUserSettings(newSettings);
+    saveScopedUserSettings(activeUserId, newSettings);
+    if (currentUser.isCloudUser) {
+      syncSettingsToCloud(activeUserId, newSettings);
+    }
+  };
 
   // Account switching and creation handlers
   const handleSwitchUser = (user: AppUser) => {
@@ -294,8 +421,10 @@ export default function App() {
   const handleLogoutToDefault = () => {
     const defaultUser = localProfiles.find(p => !p.isCloudUser) || {
       id: 'user-utama',
-      displayName: 'Akun Utama (Pemilik)',
-      email: 'pemilik@usaha.id',
+      displayName: 'Sigit Raharjo (Pemilik)',
+      email: 'sigit.raharjo@usaha.id',
+      role: 'owner',
+      pin: '1234',
       isCloudUser: false,
       createdAt: new Date().toISOString(),
     };
@@ -321,11 +450,13 @@ export default function App() {
               updated = true;
 
               // Fire Native Web Push Notification if browser allows
-              showPushNotification(
-                `🔔 Pengingat: ${task.title}`,
-                task.aiVoiceScript || `${task.title} - ${task.note || 'Waktu agenda Anda telah tiba.'}`,
-                task.id
-              );
+              if (userSettings?.browserNotifications !== false) {
+                showPushNotification(
+                  `🔔 Pengingat: ${task.title}`,
+                  task.aiVoiceScript || `${task.title} - ${task.note || 'Waktu agenda Anda telah tiba.'}`,
+                  task.id
+                );
+              }
 
               // Set active in-app alarm pop-up modal with AI Voice
               setTriggeredAlarmTask(task);
@@ -350,19 +481,24 @@ export default function App() {
               updated = true;
 
               // 1. Push notification
-              showPushNotification(
-                `💬 Pesan WhatsApp Terjadwal: ${item.recipientName}`,
-                `Pesan [${item.textType}] sedang dikirim otomatis melalui WhatsApp Anda.`,
-                item.id
-              );
+              if (userSettings?.browserNotifications !== false) {
+                showPushNotification(
+                  `💬 Pesan WhatsApp Terjadwal: ${item.recipientName}`,
+                  `Pesan [${item.textType}] sedang dikirim otomatis melalui WhatsApp Anda.`,
+                  item.id
+                );
+              }
 
-              // 2. Dispatch automatic send via linked WhatsApp session
-              sendViaActiveGateway({
-                target: item.whatsappNumber,
-                message: item.messageContent,
-              }).catch(err => {
-                console.error('[Auto-Send] Gagal mengirim pesan otomatis:', err);
-              });
+              // 2. Dispatch automatic send via active user's linked WhatsApp session
+              if (userSettings?.autoSendEnabled !== false) {
+                sendViaActiveGateway({
+                  userId: activeUserId,
+                  target: item.whatsappNumber,
+                  message: item.messageContent,
+                }).catch(err => {
+                  console.error('[Auto-Send] Gagal mengirim pesan otomatis:', err);
+                });
+              }
 
               // 3. Update recurrence or mark as sent
               if (item.recurrence !== 'none') {
@@ -547,8 +683,15 @@ export default function App() {
   };
 
   // WhatsApp Handlers
-  const handleSaveWhatsApp = (data: Omit<ScheduledWhatsApp, 'id' | 'createdAt'>) => {
-    if (editingWhatsApp) {
+  const handleSaveWhatsApp = (data: Omit<ScheduledWhatsApp, 'id' | 'createdAt'> | Omit<ScheduledWhatsApp, 'id' | 'createdAt'>[]) => {
+    if (Array.isArray(data)) {
+      const newItems: ScheduledWhatsApp[] = data.map((item, index) => ({
+        id: 'swa-' + (Date.now() + index),
+        ...item,
+        createdAt: new Date().toISOString(),
+      }));
+      setScheduledWhatsApp(prev => [...newItems, ...prev]);
+    } else if (editingWhatsApp) {
       setScheduledWhatsApp(prev => prev.map(item => 
         item.id === editingWhatsApp.id ? { ...item, ...data } : item
       ));
@@ -622,6 +765,7 @@ export default function App() {
   const handleSendWhatsAppViaGateway = async (item: ScheduledWhatsApp): Promise<{ success: boolean; message: string; provider?: string }> => {
     try {
       const res = await sendViaActiveGateway({
+        userId: activeUserId,
         target: item.whatsappNumber,
         message: item.messageContent,
       });
@@ -686,12 +830,12 @@ export default function App() {
       {/* Top Application Header with User Account Switcher */}
       <Header
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleNavigateTab}
         pendingRemindersCount={pendingRemindersCount}
         pendingWhatsAppCount={pendingWhatsAppCount}
         currentLedgerName={activeLedger.name}
         currentUser={currentUser}
-        onOpenAccountModal={() => setIsAccountModalOpen(true)}
+        onOpenAccountModal={openAccountModal}
       />
 
       {/* Main Container */}
@@ -701,7 +845,7 @@ export default function App() {
         {activeTab === 'home' ? (
           <HomeGlassNav
             activeTab={activeTab}
-            setActiveTab={setActiveTab}
+            setActiveTab={handleNavigateTab}
             pendingRemindersCount={pendingRemindersCount}
             totalRemindersCount={reminders.length}
             activeLedgerName={activeLedger.name}
@@ -713,97 +857,87 @@ export default function App() {
             recentTransactions={transactions.filter(t => t.ledgerId === activeLedgerId).slice(0, 3)}
             recentScheduledWhatsApp={scheduledWhatsApp.filter(w => w.status === 'pending').slice(0, 3)}
             currentUser={currentUser}
-            onOpenAccountModal={() => setIsAccountModalOpen(true)}
+            onOpenAccountModal={openAccountModal}
           />
         ) : activeTab === 'reminders' ? (
           <div className="space-y-4">
             <PageGlassHeader
               currentTab="reminders"
-              onNavigate={setActiveTab}
+              onNavigate={handleNavigateTab}
+              onBack={handleGoBack}
               pendingRemindersCount={pendingRemindersCount}
               pendingWhatsAppCount={pendingWhatsAppCount}
               activeLedgerName={activeLedger.name}
               currentUser={currentUser}
-              onOpenAccountModal={() => setIsAccountModalOpen(true)}
+              onOpenAccountModal={openAccountModal}
             />
             <ReminderSection
               tasks={reminders}
-              onAddTask={() => {
-                setEditingReminder(null);
-                setIsReminderModalOpen(true);
-              }}
-              onEditTask={(task) => {
-                setEditingReminder(task);
-                setIsReminderModalOpen(true);
-              }}
+              onAddTask={openAddReminder}
+              onEditTask={openEditReminder}
               onDeleteTask={handleDeleteReminder}
               onToggleComplete={handleToggleReminderComplete}
-              onOpenVoiceModal={(task) => setVoicePreviewTask(task)}
+              onOpenVoiceModal={openVoicePreviewModal}
             />
           </div>
         ) : activeTab === 'bookkeeping' ? (
           <div className="space-y-4">
             <PageGlassHeader
               currentTab="bookkeeping"
-              onNavigate={setActiveTab}
+              onNavigate={handleNavigateTab}
+              onBack={handleGoBack}
               pendingRemindersCount={pendingRemindersCount}
               pendingWhatsAppCount={pendingWhatsAppCount}
               activeLedgerName={activeLedger.name}
               currentUser={currentUser}
-              onOpenAccountModal={() => setIsAccountModalOpen(true)}
+              onOpenAccountModal={openAccountModal}
             />
             <BookkeepingSection
               ledgers={ledgers}
               activeLedger={activeLedger}
               onSelectLedger={(id) => setActiveLedgerId(id)}
-              onOpenManageLedgers={() => setIsManageLedgersModalOpen(true)}
+              onOpenManageLedgers={openManageLedgersModal}
               onCreateLedger={handleCreateLedger}
               onDeleteLedger={handleDeleteLedger}
               transactions={transactions}
-              onAddTransaction={() => {
-                setEditingTransaction(null);
-                setIsTransactionModalOpen(true);
-              }}
-              onEditTransaction={(tx) => {
-                setEditingTransaction(tx);
-                setIsTransactionModalOpen(true);
-              }}
+              onAddTransaction={openAddTransaction}
+              onEditTransaction={openEditTransaction}
               onDeleteTransaction={handleDeleteTransaction}
-              onOpenAiAnalysis={() => setIsAiAnalysisModalOpen(true)}
+              onOpenAiAnalysis={openAiAnalysisModal}
             />
           </div>
         ) : activeTab === 'whatsapp' ? (
           <div className="space-y-4">
             <PageGlassHeader
               currentTab="whatsapp"
-              onNavigate={setActiveTab}
+              onNavigate={handleNavigateTab}
+              onBack={handleGoBack}
               pendingRemindersCount={pendingRemindersCount}
               pendingWhatsAppCount={pendingWhatsAppCount}
               activeLedgerName={activeLedger.name}
               currentUser={currentUser}
-              onOpenAccountModal={() => setIsAccountModalOpen(true)}
+              onOpenAccountModal={openAccountModal}
             />
             <WhatsAppSection
               items={scheduledWhatsApp}
-              onAdd={() => {
-                setEditingWhatsApp(null);
-                setIsWhatsAppModalOpen(true);
-              }}
-              onEdit={(item) => {
-                setEditingWhatsApp(item);
-                setIsWhatsAppModalOpen(true);
-              }}
+              onAdd={openAddWhatsApp}
+              onEdit={openEditWhatsApp}
               onDelete={handleDeleteWhatsApp}
               onToggleStatus={handleToggleWhatsAppStatus}
               onSendNow={handleSendWhatsAppNow}
               onSendViaGateway={handleSendWhatsAppViaGateway}
-              onOpenSettings={() => setActiveTab('settings')}
+              onOpenSettings={() => handleNavigateTab('settings')}
+              userId={currentUser.id}
+              userName={currentUser.displayName}
             />
           </div>
         ) : activeTab === 'settings' ? (
           <div className="space-y-4">
             <SettingsPage
-              onNavigate={setActiveTab}
+              onNavigate={handleNavigateTab}
+              currentUser={currentUser}
+              userSettings={userSettings}
+              onUpdateUserSettings={handleUpdateUserSettings}
               reminders={reminders}
               ledgers={ledgers}
               transactions={transactions}
@@ -836,16 +970,16 @@ export default function App() {
               localProfiles={localProfiles}
               onSelectAccount={(selectedUser) => {
                 handleSwitchUser(selectedUser);
-                setActiveTab('home');
+                handleNavigateTab('home');
               }}
               onCreateLocalAccount={(name, role, pin, email) => {
                 handleCreateLocalAccountWithRole(name, role, pin, email);
               }}
               onCloudLoginSuccess={(cloudUser) => {
                 handleCloudLoginSuccess(cloudUser);
-                setActiveTab('home');
+                handleNavigateTab('home');
               }}
-              onBackToApp={() => setActiveTab('home')}
+              onBackToApp={handleGoBack}
             />
           </div>
         )}
@@ -863,7 +997,7 @@ export default function App() {
       {/* 0. Multi-User / Cloud Authentication Account Modal */}
       <UserAccountModal
         isOpen={isAccountModalOpen}
-        onClose={() => setIsAccountModalOpen(false)}
+        onClose={closeAccountModal}
         currentUser={currentUser}
         localProfiles={localProfiles}
         onSwitchUser={handleSwitchUser}
@@ -875,10 +1009,7 @@ export default function App() {
       {/* 1. Add / Edit Reminder Modal */}
       <ReminderModal
         isOpen={isReminderModalOpen}
-        onClose={() => {
-          setIsReminderModalOpen(false);
-          setEditingReminder(null);
-        }}
+        onClose={closeReminderModal}
         onSave={handleSaveReminder}
         editingTask={editingReminder}
       />
@@ -886,10 +1017,7 @@ export default function App() {
       {/* 2. Add / Edit Transaction Modal */}
       <TransactionModal
         isOpen={isTransactionModalOpen}
-        onClose={() => {
-          setIsTransactionModalOpen(false);
-          setEditingTransaction(null);
-        }}
+        onClose={closeTransactionModal}
         onSave={handleSaveTransaction}
         activeLedger={activeLedger}
         editingTransaction={editingTransaction}
@@ -898,7 +1026,7 @@ export default function App() {
       {/* 3. Manage Multi-Ledgers Modal */}
       <ManageLedgersModal
         isOpen={isManageLedgersModalOpen}
-        onClose={() => setIsManageLedgersModalOpen(false)}
+        onClose={closeManageLedgersModal}
         ledgers={ledgers}
         activeLedgerId={activeLedgerId}
         onSelectLedger={(id) => setActiveLedgerId(id)}
@@ -909,14 +1037,15 @@ export default function App() {
       {/* 4. AI Voice Script Preview & Testing Modal */}
       <VoicePreviewModal
         task={voicePreviewTask}
-        onClose={() => setVoicePreviewTask(null)}
+        onClose={closeVoicePreviewModal}
         onUpdateScript={handleUpdateAiVoiceScript}
       />
 
       {/* 5. Scheduled Alarm / Push Notification Triggered Pop-up */}
       <AlarmAlertModal
         task={triggeredAlarmTask}
-        onClose={() => setTriggeredAlarmTask(null)}
+        userSettings={userSettings}
+        onClose={closeAlarmAlertModal}
         onMarkDone={handleMarkAlarmDone}
         onSnooze={handleSnooze}
       />
@@ -924,7 +1053,7 @@ export default function App() {
       {/* 6. AI Financial Analysis Modal */}
       <AiAnalysisModal
         isOpen={isAiAnalysisModalOpen}
-        onClose={() => setIsAiAnalysisModalOpen(false)}
+        onClose={closeAiAnalysisModal}
         ledger={activeLedger}
         transactions={transactions.filter(t => t.ledgerId === activeLedger.id)}
       />
@@ -932,13 +1061,24 @@ export default function App() {
       {/* 7. Scheduled WhatsApp Modal */}
       <WhatsAppModal
         isOpen={isWhatsAppModalOpen}
-        onClose={() => {
-          setIsWhatsAppModalOpen(false);
-          setEditingWhatsApp(null);
-        }}
+        onClose={closeWhatsAppModal}
         onSave={handleSaveWhatsApp}
         editingItem={editingWhatsApp}
+        defaultAntiSpamMinutes={userSettings?.antiSpamIntervalMinutes}
       />
+
+      {/* Android Back-Button Exit Toast Notification */}
+      {showExitToast && (
+        <div 
+          id="android-exit-toast"
+          className="fixed bottom-20 sm:bottom-8 inset-x-0 mx-auto w-max max-w-[90vw] z-50 pointer-events-none transition-all duration-300 transform animate-in fade-in slide-in-from-bottom-4"
+        >
+          <div className="flex items-center space-x-2.5 px-4 py-2.5 rounded-full bg-slate-900/90 backdrop-blur-xl text-white text-xs font-semibold shadow-2xl border border-white/15">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
+            <span>Tekan kembali sekali lagi untuk keluar dari aplikasi</span>
+          </div>
+        </div>
+      )}
 
     </div>
   );

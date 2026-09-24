@@ -76,7 +76,9 @@ export function getIndonesianVoice(): SpeechSynthesisVoice | null {
 export function speakText(
   text: string, 
   tone: 'friendly' | 'professional' | 'urgent' | 'cheerful' = 'friendly',
-  onEnd?: () => void
+  onEnd?: () => void,
+  customRate?: number,
+  customPitch?: number
 ): { cancel: () => void } {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     onEnd?.();
@@ -93,24 +95,24 @@ export function speakText(
   }
   utterance.lang = 'id-ID';
 
-  // Customize pitch and rate based on tone
+  // Base pitch and rate based on tone
   switch (tone) {
     case 'urgent':
-      utterance.rate = 1.15;
-      utterance.pitch = 1.1;
+      utterance.rate = customRate ?? 1.15;
+      utterance.pitch = customPitch ?? 1.1;
       break;
     case 'cheerful':
-      utterance.rate = 1.05;
-      utterance.pitch = 1.25;
+      utterance.rate = customRate ?? 1.05;
+      utterance.pitch = customPitch ?? 1.25;
       break;
     case 'professional':
-      utterance.rate = 0.95;
-      utterance.pitch = 0.95;
+      utterance.rate = customRate ?? 0.95;
+      utterance.pitch = customPitch ?? 0.95;
       break;
     case 'friendly':
     default:
-      utterance.rate = 1.0;
-      utterance.pitch = 1.05;
+      utterance.rate = customRate ?? 1.0;
+      utterance.pitch = customPitch ?? 1.05;
       break;
   }
 

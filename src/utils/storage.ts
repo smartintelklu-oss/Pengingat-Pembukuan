@@ -1,4 +1,4 @@
-import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp, AppUser, UserRole } from '../types';
+import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp, AppUser, UserRole, UserSettings } from '../types';
 
 const STORAGE_KEYS = {
   REMINDERS: 'catatan_reminders_v1',
@@ -389,8 +389,8 @@ const ACTIVE_USER_ID_KEY = 'catatan_active_user_id_v1';
 export const DEFAULT_LOCAL_USERS: AppUser[] = [
   {
     id: 'user-utama',
-    displayName: 'Budi Santoso (Pemilik)',
-    email: 'pemilik@usaha.id',
+    displayName: 'Sigit Raharjo (Pemilik)',
+    email: 'sigit.raharjo@usaha.id',
     role: 'owner',
     pin: '1234',
     isCloudUser: false,
@@ -416,11 +416,21 @@ export function loadLocalUserProfiles(): AppUser[] {
     }
     const parsed: AppUser[] = JSON.parse(raw);
     // Ensure existing profiles have role and pin defaults if older version was stored
-    return parsed.map((u, index) => ({
-      ...u,
-      role: u.role || (index === 0 ? 'owner' : 'staff'),
-      pin: u.pin || (index === 0 ? '1234' : '0000'),
-    }));
+    // and ensure default main account name is Sigit Raharjo (Pemilik)
+    const updated = parsed.map((u, index) => {
+      let displayName = u.displayName;
+      if (u.id === 'user-utama' && (displayName === 'Budi Santoso (Pemilik)' || displayName === 'Akun Utama (Pemilik)' || displayName === 'Akun Utama')) {
+        displayName = 'Sigit Raharjo (Pemilik)';
+      }
+      return {
+        ...u,
+        displayName,
+        role: u.role || (index === 0 ? 'owner' : 'staff'),
+        pin: u.pin || (index === 0 ? '1234' : '0000'),
+      };
+    });
+    localStorage.setItem(USER_PROFILES_KEY, JSON.stringify(updated));
+    return updated;
   } catch {
     return DEFAULT_LOCAL_USERS;
   }
@@ -552,6 +562,47 @@ export function saveScopedScheduledWhatsApp(userId: string, items: ScheduledWhat
     localStorage.setItem(`catatan_wa_user_${userId}`, JSON.stringify(items));
   } catch (e) {
     console.error('Error saving scoped scheduled WhatsApp:', e);
+  }
+}
+
+export const DEFAULT_USER_SETTINGS = (userId: string): UserSettings => ({
+  userId,
+  enableVoiceAssistant: true,
+  voicePitch: 1.05,
+  voiceRate: 1.0,
+  voiceTone: 'friendly',
+  playChime: true,
+  autoSendEnabled: true,
+  antiSpamIntervalMinutes: 10,
+  browserNotifications: true,
+  defaultReminderOffset: 15,
+  updatedAt: new Date().toISOString(),
+});
+
+export function loadScopedUserSettings(userId: string): UserSettings {
+  try {
+    const key = `catatan_settings_user_${userId}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) {
+      const initial = DEFAULT_USER_SETTINGS(userId);
+      localStorage.setItem(key, JSON.stringify(initial));
+      return initial;
+    }
+    return {
+      ...DEFAULT_USER_SETTINGS(userId),
+      ...JSON.parse(raw),
+    };
+  } catch (e) {
+    console.error('Error loading scoped user settings:', e);
+    return DEFAULT_USER_SETTINGS(userId);
+  }
+}
+
+export function saveScopedUserSettings(userId: string, settings: UserSettings): void {
+  try {
+    localStorage.setItem(`catatan_settings_user_${userId}`, JSON.stringify(settings));
+  } catch (e) {
+    console.error('Error saving scoped user settings:', e);
   }
 }
 

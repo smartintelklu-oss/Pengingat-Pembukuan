@@ -23,7 +23,7 @@ import {
   User
 } from 'firebase/auth';
 import config from '../../firebase-applet-config.json';
-import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp } from '../types';
+import { ReminderTask, Transaction, LedgerBook, ScheduledWhatsApp, UserSettings } from '../types';
 
 export { 
   signInWithPopup, 
@@ -207,3 +207,30 @@ export async function deleteScheduledWhatsAppFromCloud(userId: string, waId: str
     console.error('Error deleting scheduled WhatsApp from cloud:', err);
   }
 }
+
+export function subscribeUserSettings(
+  userId: string,
+  callback: (settings: UserSettings) => void
+): () => void {
+  const docRef = doc(db, 'users', userId, 'settings', 'app');
+  return onSnapshot(docRef, (docSnap) => {
+    if (docSnap.exists()) {
+      callback(docSnap.data() as UserSettings);
+    }
+  }, (err) => {
+    console.warn('Firestore settings sync warning:', err);
+  });
+}
+
+export async function syncSettingsToCloud(userId: string, settings: UserSettings): Promise<void> {
+  try {
+    await setDoc(doc(db, 'users', userId, 'settings', 'app'), {
+      ...settings,
+      userId,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (err) {
+    console.error('Error syncing settings to cloud:', err);
+  }
+}
+

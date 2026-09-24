@@ -33,6 +33,11 @@ service cloud.firestore {
       match /scheduledWhatsApp/{waId} {
         allow read, write: if isOwner(userId);
       }
+
+      // User's private settings subcollection
+      match /settings/{settingId} {
+        allow read, write: if isOwner(userId);
+      }
     }
 
     // Connection testing document

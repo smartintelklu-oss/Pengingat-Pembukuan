@@ -16,6 +16,7 @@ import { User, Users, Cloud, CloudOff, LogIn, ShieldCheck, Briefcase } from 'luc
 interface PageGlassHeaderProps {
   currentTab: 'reminders' | 'bookkeeping' | 'whatsapp' | 'settings' | 'login';
   onNavigate: (tab: AppTab) => void;
+  onBack?: () => void;
   pendingRemindersCount?: number;
   pendingWhatsAppCount?: number;
   activeLedgerName?: string;
@@ -26,6 +27,7 @@ interface PageGlassHeaderProps {
 export const PageGlassHeader: React.FC<PageGlassHeaderProps> = ({
   currentTab,
   onNavigate,
+  onBack,
   pendingRemindersCount = 0,
   pendingWhatsAppCount = 0,
   activeLedgerName,
@@ -89,17 +91,17 @@ export const PageGlassHeader: React.FC<PageGlassHeaderProps> = ({
         {/* Left: Back Button & Breadcrumbs */}
         <div className="space-y-2">
           <div className="flex items-center space-x-2 text-xs">
-            {/* Back to Home Glass Button */}
+            {/* Back to Previous View / Home Glass Button */}
             <button
               id="btn-back-to-home"
               type="button"
-              onClick={() => onNavigate('home')}
+              onClick={() => onBack ? onBack() : onNavigate('home')}
               className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900/5 hover:bg-slate-900/10 text-slate-700 hover:text-slate-900 border border-slate-200/70 backdrop-blur-md transition-all font-bold cursor-pointer group"
-              title="Kembali ke Beranda (Menu Utama Kaca)"
+              title="Kembali ke Tampilan Sebelumnya"
             >
               <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-0.5" />
               <Home className="w-3.5 h-3.5 text-slate-500" />
-              <span>Kembali ke Beranda</span>
+              <span>Kembali</span>
             </button>
 
             <ChevronRight className="w-3.5 h-3.5 text-slate-300" />

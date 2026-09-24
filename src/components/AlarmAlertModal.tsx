@@ -10,12 +10,13 @@ import {
   Sparkles,
   RotateCcw
 } from 'lucide-react';
-import { ReminderTask } from '../types';
+import { ReminderTask, UserSettings } from '../types';
 import { speakText, playNotificationChime } from '../utils/audio';
 import { sendWhatsAppMessage } from '../utils/whatsapp';
 
 interface AlarmAlertModalProps {
   task: ReminderTask | null;
+  userSettings?: UserSettings;
   onClose: () => void;
   onMarkDone: (taskId: string) => void;
   onSnooze: (taskId: string, minutes: number) => void;
@@ -23,6 +24,7 @@ interface AlarmAlertModalProps {
 
 export const AlarmAlertModal: React.FC<AlarmAlertModalProps> = ({
   task,
+  userSettings,
   onClose,
   onMarkDone,
   onSnooze,
@@ -36,20 +38,33 @@ export const AlarmAlertModal: React.FC<AlarmAlertModalProps> = ({
     let isMounted = true;
 
     const triggerAlert = async () => {
-      // 1. Play synthesized bell chime
-      await playNotificationChime();
+      // 1. Play synthesized bell chime if user setting permits
+      const shouldPlayChime = userSettings?.playChime ?? true;
+      if (shouldPlayChime) {
+        await playNotificationChime();
+      }
       
       if (!isMounted) return;
 
-      // 2. Speak AI reminder script
-      const scriptToSpeak = task.aiVoiceScript || `Perhatian! Ini adalah pengingat untuk tugas: ${task.title}. Rincian: ${task.note || 'Harap segera dikerjakan.'}`;
-      setIsSpeaking(true);
+      // 2. Speak AI reminder script if user setting permits
+      const shouldSpeak = userSettings?.enableVoiceAssistant ?? true;
+      if (shouldSpeak) {
+        const scriptToSpeak = task.aiVoiceScript || `Perhatian! Ini adalah pengingat untuk tugas: ${task.title}. Rincian: ${task.note || 'Harap segera dikerjakan.'}`;
+        setIsSpeaking(true);
 
-      const controller = speakText(scriptToSpeak, task.aiVoiceTone, () => {
-        if (isMounted) setIsSpeaking(false);
-      });
+        const tone = task.aiVoiceTone || userSettings?.voiceTone || 'friendly';
+        const controller = speakText(
+          scriptToSpeak, 
+          tone, 
+          () => {
+            if (isMounted) setIsSpeaking(false);
+          },
+          userSettings?.voiceRate,
+          userSettings?.voicePitch
+        );
 
-      setSpeechCancel(() => controller.cancel);
+        setSpeechCancel(() => controller.cancel);
+      }
 
       // 3. If WhatsApp Auto Send is enabled, prompt or send
       if (task.whatsappAutoSend && task.whatsappNumber) {

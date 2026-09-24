@@ -9,11 +9,9 @@ import {
   Send,
   Zap,
   ShieldCheck,
-  Check,
   PhoneCall,
-  Info,
-  Clock,
-  ExternalLink,
+  User,
+  BadgeCheck,
 } from 'lucide-react';
 import {
   getWhatsAppStatus,
@@ -23,8 +21,19 @@ import {
   WhatsAppState,
 } from '../utils/whatsappGateway';
 
-export const WhatsAppQRSettingsCard: React.FC = () => {
+interface WhatsAppQRSettingsCardProps {
+  userId?: string;
+  userName?: string;
+  userRole?: string;
+}
+
+export const WhatsAppQRSettingsCard: React.FC<WhatsAppQRSettingsCardProps> = ({
+  userId = 'user-utama',
+  userName = 'Pemilik Usaha',
+  userRole = 'owner',
+}) => {
   const [waState, setWaState] = useState<WhatsAppState>({
+    userId,
     status: 'disconnected',
     isConnected: false,
     qrCode: null,
@@ -39,7 +48,9 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
 
   // Test Message Sender State
   const [testTarget, setTestTarget] = useState('');
-  const [testMessage, setTestMessage] = useState('Halo! Ini adalah pesan uji coba otomatis langsung dari sistem Pengingat & Pembukuan.');
+  const [testMessage, setTestMessage] = useState(
+    `Halo! Ini adalah pesan uji coba otomatis dari sistem Pengingat & Pembukuan untuk akun ${userName}.`
+  );
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -48,26 +59,40 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Function to refresh WhatsApp state from backend
-  const fetchStatus = async () => {
+  // Function to refresh WhatsApp state from backend for active userId
+  const fetchStatus = async (targetUserId = userId) => {
     try {
-      const state = await getWhatsAppStatus();
+      const state = await getWhatsAppStatus(targetUserId);
       setWaState(state);
     } catch (err: any) {
-      console.error('Error fetching WA status:', err);
+      console.error(`Error fetching WA status for ${targetUserId}:`, err);
     }
   };
 
-  // Initial load
+  // When userId changes: clear state, reset test result, and fetch this user's session
   useEffect(() => {
-    fetchStatus();
-  }, []);
+    setWaState({
+      userId,
+      status: 'disconnected',
+      isConnected: false,
+      qrCode: null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: null,
+    });
+    setTestResult(null);
+    setTestMessage(
+      `Halo! Ini adalah pesan uji coba otomatis dari sistem Pengingat & Pembukuan untuk akun ${userName}.`
+    );
+    fetchStatus(userId);
+  }, [userId, userName]);
 
   // Auto-polling when waiting for QR scan or connecting
   useEffect(() => {
     if (waState.status === 'qr_ready' || waState.status === 'connecting') {
       pollingRef.current = setInterval(() => {
-        fetchStatus();
+        fetchStatus(userId);
       }, 2500);
     } else {
       if (pollingRef.current) {
@@ -82,18 +107,24 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
         pollingRef.current = null;
       }
     };
-  }, [waState.status]);
+  }, [waState.status, userId]);
 
-  // Handler: Start connection & generate QR
-  const handleConnect = async (forceFresh = false) => {
+  // Handler: Start connection & generate QR for active user
+  const handleConnect = async (forceFresh = true) => {
     setIsLoading(true);
     setTestResult(null);
+    setWaState((prev) => ({
+      ...prev,
+      status: 'connecting',
+      lastError: null,
+    }));
     try {
-      const state = await connectWhatsApp(forceFresh);
+      const state = await connectWhatsApp(userId, forceFresh);
       setWaState(state);
     } catch (err: any) {
       setWaState((prev) => ({
         ...prev,
+        status: 'disconnected',
         lastError: err.message || 'Gagal memulai koneksi WhatsApp.',
       }));
     } finally {
@@ -101,17 +132,21 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
     }
   };
 
-  // Handler: Disconnect / Logout
+  // Handler: Disconnect / Logout active user's session
   const handleDisconnect = async () => {
-    if (!window.confirm('Apakah Anda yakin ingin memutuskan sambungan WhatsApp ini? Anda harus scan QR ulang jika ingin menghubungkannya kembali.')) {
+    if (
+      !window.confirm(
+        `Apakah Anda yakin ingin memutuskan sambungan WhatsApp untuk akun "${userName}"? Anda harus scan QR ulang jika ingin menghubungkannya kembali.`
+      )
+    ) {
       return;
     }
 
     setIsDisconnecting(true);
     setTestResult(null);
     try {
-      await disconnectWhatsApp();
-      await fetchStatus();
+      await disconnectWhatsApp(userId);
+      await fetchStatus(userId);
     } catch (err: any) {
       alert('Gagal memutuskan sambungan: ' + err.message);
     } finally {
@@ -132,6 +167,7 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
 
     try {
       const res = await sendViaActiveGateway({
+        userId,
         target: testTarget.trim(),
         message: testMessage.trim(),
       });
@@ -154,7 +190,36 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
     <div className="space-y-6">
       {/* 1. Main WhatsApp Gateway Card */}
       <div className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 shadow-xs space-y-6">
-        
+        {/* User Account Scope Identification Banner */}
+        <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/70 text-xs">
+          <div className="flex items-center space-x-2.5">
+            <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+              <User className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-slate-500 font-medium">WhatsApp untuk Akun:</span>
+                <span className="font-extrabold text-slate-900">{userName}</span>
+                <span className="px-2 py-0.5 rounded-full text-2xs font-bold bg-emerald-100 text-emerald-800">
+                  {userRole === 'owner' ? 'Pemilik (Owner)' : 'Staf'}
+                </span>
+              </div>
+              <p className="text-2xs text-slate-500 mt-0.5">
+                Setiap pemilik/akun memiliki nomor WhatsApp dan sesi scan QR tersendiri.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchStatus(userId)}
+            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-slate-900 text-2xs font-bold transition-all cursor-pointer shadow-2xs"
+            title="Muat ulang status sesi akun ini"
+          >
+            <RefreshCw className="w-3 h-3" />
+            <span>Cek Status</span>
+          </button>
+        </div>
+
         {/* Header with Title & Badge */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
           <div className="flex items-start space-x-3.5">
@@ -164,15 +229,15 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
             <div>
               <div className="flex items-center space-x-2">
                 <h3 className="text-lg font-black text-slate-900 tracking-tight">
-                  Tautkan WhatsApp (Scan QR Code)
+                  Tautkan WhatsApp Akun {userName}
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full text-2xs font-extrabold uppercase tracking-wider bg-emerald-100 text-emerald-800">
-                  Resmi Mandiri
+                  Mandiri Multi-Akun
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-1 max-w-xl leading-relaxed">
-                Hubungkan WhatsApp langsung ke nomor HP Anda sendiri seperti WhatsApp Web. 
-                Tidak memerlukan akun, token, atau langganan pihak ketiga. 100% langsung terhubung ke ponsel Anda.
+                Hubungkan WhatsApp nomor ponsel Anda sendiri khusus untuk akun <strong>{userName}</strong>. 
+                Tanpa perantara atau API berbayar.
               </p>
             </div>
           </div>
@@ -225,7 +290,7 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
                 <div>
                   <div className="flex items-center space-x-2">
                     <h4 className="text-sm font-black text-slate-900">
-                      WhatsApp HP Anda Terhubung!
+                      WhatsApp {userName} Terhubung!
                     </h4>
                     <span className="px-2 py-0.5 rounded-md text-2xs font-extrabold bg-emerald-200 text-emerald-900">
                       Multi-Device Ready
@@ -245,7 +310,11 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
                     )}
                     {waState.lastConnectedAt && (
                       <span className="text-slate-400 text-2xs">
-                        Aktif sejak: {new Date(waState.lastConnectedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                        Aktif sejak:{' '}
+                        {new Date(waState.lastConnectedAt).toLocaleTimeString('id-ID', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
                       </span>
                     )}
                   </div>
@@ -271,31 +340,38 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
             <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-start space-x-3">
               <Zap className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
               <p className="leading-relaxed">
-                <strong>Pengiriman Otomatis Aktif:</strong> Setiap pesan pengingat agenda, tagihan keuangan, atau pesan WhatsApp terjadwal sekarang akan dikirim otomatis langsung melalui nomor WhatsApp Anda di atas tanpa perlu klik manual.
+                <strong>Pengiriman Otomatis Aktif:</strong> Setiap pesan WhatsApp terjadwal, pengingat, atau tagihan milik akun <strong>{userName}</strong> akan dikirim secara otomatis melalui nomor WhatsApp +{waState.phoneNumber || 'Anda'}.
               </p>
             </div>
           </div>
         )}
 
         {/* STATE 2: QR CODE READY */}
-        {waState.status === 'qr_ready' && waState.qrCode && (
+        {!waState.isConnected && waState.qrCode && (
           <div className="space-y-6 animate-in fade-in duration-300">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-              
               {/* QR Code Container */}
               <div className="md:col-span-5 flex flex-col items-center justify-center p-6 bg-slate-50 rounded-3xl border border-slate-200/90 text-center">
-                <div className="p-3 bg-white rounded-2xl shadow-sm border border-slate-200 inline-block relative group">
+                <div className="p-3 bg-white rounded-2xl shadow-md border border-slate-200 inline-block relative group">
                   <img
                     src={waState.qrCode}
                     alt="WhatsApp QR Code"
                     className="w-56 h-56 sm:w-64 sm:h-64 rounded-xl object-contain mx-auto"
+                    onError={() => {
+                      console.warn('QR image load error, refreshing...');
+                      handleConnect(true);
+                    }}
                   />
-                  <div className="absolute inset-0 border-2 border-emerald-500/20 rounded-2xl pointer-events-none" />
+                  <div className="absolute inset-0 border-2 border-emerald-500/30 rounded-2xl pointer-events-none" />
                 </div>
 
-                <div className="mt-4 flex items-center space-x-2 text-xs font-bold text-emerald-700 animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>Menunggu scan dari aplikasi WhatsApp Anda...</span>
+                <div className="mt-4 flex items-center space-x-2 text-xs font-bold text-emerald-700">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+                  <span>
+                    {waState.status === 'connecting'
+                      ? 'Menghubungkan & Memperbarui QR...'
+                      : `Scan Barcode ini dari WhatsApp HP ${userName}`}
+                  </span>
                 </div>
 
                 <div className="mt-3 flex items-center space-x-2">
@@ -303,17 +379,17 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
                     type="button"
                     onClick={() => handleConnect(true)}
                     disabled={isLoading}
-                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 text-2xs font-bold hover:bg-slate-100 transition-all cursor-pointer"
+                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 text-2xs font-bold hover:bg-slate-100 transition-all cursor-pointer shadow-2xs"
                   >
                     <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-                    <span>Muat Ulang QR</span>
+                    <span>Perbarui Barcode QR</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleDisconnect}
-                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-slate-500 hover:text-rose-600 text-2xs font-bold transition-all cursor-pointer"
+                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-slate-500 hover:text-rose-600 text-2xs font-bold transition-all cursor-pointer"
                   >
-                    <span>Batal</span>
+                    <span>Tutup</span>
                   </button>
                 </div>
               </div>
@@ -322,7 +398,7 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
               <div className="md:col-span-7 space-y-4">
                 <h4 className="text-sm font-extrabold text-slate-900 flex items-center space-x-2">
                   <Smartphone className="w-4 h-4 text-emerald-600" />
-                  <span>Petunjuk Tautkan Perangkat di Ponsel:</span>
+                  <span>Petunjuk Tautkan WhatsApp untuk {userName}:</span>
                 </h4>
 
                 <ol className="space-y-3 text-xs text-slate-600">
@@ -330,13 +406,13 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
                     <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold flex items-center justify-center shrink-0 text-2xs">
                       1
                     </span>
-                    <span>Buka aplikasi <strong>WhatsApp</strong> di HP Anda.</span>
+                    <span>Buka aplikasi <strong>WhatsApp</strong> di ponsel pemilik/pengguna ini.</span>
                   </li>
                   <li className="flex items-start space-x-3 p-3 rounded-2xl bg-white border border-slate-100 shadow-2xs">
                     <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold flex items-center justify-center shrink-0 text-2xs">
                       2
                     </span>
-                    <span>Ketuk <strong>Menu (titik tiga ⋮)</strong> di Android atau buka tab <strong>Pengaturan</strong> di iPhone.</span>
+                    <span>Ketuk <strong>Menu (titik tiga ⋮)</strong> di Android atau buka <strong>Pengaturan</strong> di iPhone.</span>
                   </li>
                   <li className="flex items-start space-x-3 p-3 rounded-2xl bg-white border border-slate-100 shadow-2xs">
                     <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold flex items-center justify-center shrink-0 text-2xs">
@@ -348,22 +424,57 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
                     <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 font-extrabold flex items-center justify-center shrink-0 text-2xs">
                       4
                     </span>
-                    <span>Ketuk tombol <strong>Tautkan Perangkat</strong>, lalu arahkan kamera HP Anda ke kode QR di samping.</span>
+                    <span>Ketuk <strong>Tautkan Perangkat</strong> dan arahkan kamera HP ke Kode QR di sebelah kiri.</span>
                   </li>
                 </ol>
 
                 <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 text-2xs text-emerald-800 flex items-center space-x-2.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Setelah berhasil di-scan, layar ini akan otomatis berubah menjadi status <strong>Terhubung</strong>.</span>
+                  <BadgeCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Sesi tersimpan aman di server dan tidak akan tertukar dengan akun pemilik lain.</span>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
 
+        {/* STATE 2.5: CONNECTING / GENERATING QR CODE */}
+        {!waState.isConnected && !waState.qrCode && (isLoading || waState.status === 'connecting') && (
+          <div className="p-8 sm:p-10 rounded-3xl bg-gradient-to-br from-emerald-50/50 via-white to-teal-50/40 border border-emerald-200/80 text-center space-y-5 animate-in fade-in duration-300 shadow-xs">
+            <div className="w-16 h-16 rounded-3xl bg-emerald-100/90 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
+              <RefreshCw className="w-8 h-8 animate-spin text-emerald-600" />
+            </div>
+
+            <div className="max-w-md mx-auto space-y-1.5">
+              <h4 className="text-base font-black text-slate-900">
+                Menyiapkan Kode QR WhatsApp...
+              </h4>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Sedang menghubungi server WhatsApp untuk membuat barcode otorisasi baru khusus akun <strong>{userName}</strong>. Mohon tunggu beberapa detik, gambar QR akan otomatis muncul di sini.
+              </p>
+            </div>
+
+            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-emerald-100 text-emerald-800 text-2xs font-extrabold">
+              <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+              <span>Membuat Barcode Otorisasi WhatsApp...</span>
+            </div>
+
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsLoading(false);
+                  setWaState(prev => ({ ...prev, status: 'disconnected' }));
+                }}
+                className="text-xs text-slate-400 hover:text-rose-600 transition-colors cursor-pointer font-medium"
+              >
+                Batal
+              </button>
             </div>
           </div>
         )}
 
         {/* STATE 3: DISCONNECTED / INITIAL */}
-        {!waState.isConnected && waState.status !== 'qr_ready' && (
+        {!waState.isConnected && !waState.qrCode && !isLoading && waState.status !== 'connecting' && (
           <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 border border-slate-200/90 text-center space-y-5">
             <div className="w-16 h-16 rounded-3xl bg-emerald-100 text-emerald-700 flex items-center justify-center mx-auto shadow-inner">
               <QrCode className="w-8 h-8" />
@@ -371,10 +482,10 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
 
             <div className="max-w-md mx-auto space-y-1.5">
               <h4 className="text-base font-black text-slate-900">
-                Hubungkan WhatsApp dengan Scan QR
+                Tautkan WhatsApp Akun {userName}
               </h4>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Klik tombol di bawah untuk menampilkan kode QR. Anda cukup scan dari WhatsApp di HP Anda sekali saja, dan pesan otomatis dapat langsung aktif.
+                Scan QR sekali saja dari HP pemilik akun ini untuk mengaktifkan pengiriman pesan otomatis tersendiri.
               </p>
             </div>
 
@@ -391,7 +502,7 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
                 ) : (
                   <QrCode className="w-4 h-4" />
                 )}
-                <span>{isLoading ? 'Menyiapkan QR Code...' : 'Tampilkan Kode QR (Mulai Scan)'}</span>
+                <span>{isLoading ? 'Menyiapkan QR Code...' : `Tampilkan Kode QR Akun ${userName}`}</span>
               </button>
             </div>
 
@@ -399,27 +510,26 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
             <div className="pt-4 border-t border-slate-100 max-w-lg mx-auto grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
               <div className="flex items-center space-x-2 text-2xs text-slate-600">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>100% Gratis &amp; Tanpa Biaya Bulanan</span>
+                <span>Nomor WhatsApp Pribadi / Akun Tersendiri</span>
               </div>
               <div className="flex items-center space-x-2 text-2xs text-slate-600">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Bebas Token Pihak Ketiga</span>
+                <span>Otomatis &amp; Terjadwal Mandiri</span>
               </div>
               <div className="flex items-center space-x-2 text-2xs text-slate-600">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Kirim Terjadwal di Latar Belakang</span>
+                <span>Bebas Biaya API Pihak Ketiga</span>
               </div>
               <div className="flex items-center space-x-2 text-2xs text-slate-600">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Enkripsi Resmi Multi-Device</span>
+                <span>Multi-Device Resmi &amp; Aman</span>
               </div>
             </div>
           </div>
         )}
-
       </div>
 
-      {/* 2. Interactive Live Message Tester (Shown when Connected or Ready) */}
+      {/* 2. Interactive Live Message Tester */}
       <div className="p-6 sm:p-7 rounded-3xl bg-white border border-slate-200/80 shadow-xs space-y-5">
         <div className="flex items-start space-x-3.5 pb-4 border-b border-slate-100">
           <div className="w-10 h-10 rounded-xl bg-teal-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-teal-500/25">
@@ -427,17 +537,16 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
           </div>
           <div>
             <h3 className="text-base font-extrabold text-slate-900">
-              Uji Coba Pengiriman Pesan WhatsApp
+              Uji Coba Pengiriman Pesan WhatsApp ({userName})
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Kirim pesan tes langsung dari nomor WhatsApp Anda yang tertaut ke nomor tujuan untuk memastikan sistem otomatis bekerja lancar.
+              Kirim pesan tes langsung dari nomor WhatsApp yang tertaut ke akun ini.
             </p>
           </div>
         </div>
 
         <form onSubmit={handleSendTestMessage} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
-            
             {/* Target Phone Number */}
             <div className="sm:col-span-5 space-y-1.5">
               <label className="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
@@ -458,9 +567,7 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
 
             {/* Test Message Body */}
             <div className="sm:col-span-7 space-y-1.5">
-              <label className="text-xs font-bold text-slate-700">
-                Isi Pesan Uji Coba:
-              </label>
+              <label className="text-xs font-bold text-slate-700">Isi Pesan Uji Coba:</label>
               <textarea
                 rows={2}
                 value={testMessage}
@@ -474,8 +581,8 @@ export const WhatsAppQRSettingsCard: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
             <span className="text-2xs text-slate-400">
               {waState.isConnected
-                ? `● Siap kirim dari +${waState.phoneNumber || 'Nomor Anda'}`
-                : '⚠ WhatsApp belum terhubung. Pastikan sudah scan QR di atas sebelum mengirim tes.'}
+                ? `● Siap kirim dari +${waState.phoneNumber || 'Nomor Akun Ini'}`
+                : `⚠ WhatsApp akun ${userName} belum terhubung. Silakan scan QR di atas.`}
             </span>
 
             <button

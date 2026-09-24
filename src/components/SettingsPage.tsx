@@ -17,9 +17,23 @@ import {
   Server,
   Zap,
   HardDrive,
-  Laptop
+  Laptop,
+  User,
+  Sliders,
+  Bell,
+  Check,
+  Radio,
+  Timer
 } from 'lucide-react';
-import { AppTab, ReminderTask, LedgerBook, Transaction, ScheduledWhatsApp } from '../types';
+import { 
+  AppTab, 
+  ReminderTask, 
+  LedgerBook, 
+  Transaction, 
+  ScheduledWhatsApp, 
+  AppUser, 
+  UserSettings 
+} from '../types';
 import { PageGlassHeader } from './PageGlassHeader';
 import { WhatsAppQRSettingsCard } from './WhatsAppQRSettingsCard';
 import { PWAInstallButton } from './PWAInstallButton';
@@ -27,6 +41,9 @@ import { playNotificationChime } from '../utils/audio';
 
 interface SettingsPageProps {
   onNavigate: (tab: AppTab) => void;
+  currentUser?: AppUser;
+  userSettings?: UserSettings;
+  onUpdateUserSettings?: (newSettings: UserSettings) => void;
   reminders?: ReminderTask[];
   ledgers?: LedgerBook[];
   transactions?: Transaction[];
@@ -41,21 +58,59 @@ interface SettingsPageProps {
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
   onNavigate,
+  currentUser,
+  userSettings,
+  onUpdateUserSettings,
   reminders = [],
   ledgers = [],
   transactions = [],
   scheduledWhatsApp = [],
   onDataImported,
 }) => {
-  const [activeSettingsSection, setActiveSettingsSection] = useState<'gateway' | 'voice' | 'backup' | 'pwa'>('gateway');
+  const [activeSettingsSection, setActiveSettingsSection] = useState<'gateway' | 'voice' | 'automation' | 'backup' | 'pwa'>('gateway');
   const [backupSuccessMessage, setBackupSuccessMessage] = useState<string | null>(null);
   const [backupErrorMessage, setBackupErrorMessage] = useState<string | null>(null);
+  const [settingsSavedToast, setSettingsSavedToast] = useState(false);
+
+  // Active user details
+  const activeUserId = currentUser?.id || 'user-utama';
+  const activeUserName = currentUser?.displayName || 'Pemilik Usaha';
+  const isOwner = currentUser?.role === 'owner' || !currentUser?.role;
+
+  // Local settings state
+  const currentVoicePitch = userSettings?.voicePitch ?? 1.05;
+  const currentVoiceRate = userSettings?.voiceRate ?? 1.0;
+  const currentVoiceTone = userSettings?.voiceTone ?? 'friendly';
+  const currentEnableVoice = userSettings?.enableVoiceAssistant ?? true;
+  const currentPlayChime = userSettings?.playChime ?? true;
+  const currentAutoSend = userSettings?.autoSendEnabled ?? true;
+  const currentAntiSpam = userSettings?.antiSpamIntervalMinutes ?? 10;
+  const currentBrowserNotif = userSettings?.browserNotifications ?? true;
+
+  const updateSetting = (partial: Partial<UserSettings>) => {
+    if (userSettings && onUpdateUserSettings) {
+      const updated: UserSettings = {
+        ...userSettings,
+        ...partial,
+        userId: activeUserId,
+        updatedAt: new Date().toISOString(),
+      };
+      onUpdateUserSettings(updated);
+      setSettingsSavedToast(true);
+      setTimeout(() => setSettingsSavedToast(false), 2500);
+    }
+  };
 
   // Export all application data as JSON
   const handleExportData = () => {
     try {
       const dataToExport = {
         app: 'Pengingat & Pembukuan',
+        user: {
+          id: activeUserId,
+          name: activeUserName,
+          role: currentUser?.role || 'owner',
+        },
         exportedAt: new Date().toISOString(),
         version: '1.0.0',
         data: {
@@ -63,6 +118,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           ledgers,
           transactions,
           scheduledWhatsApp,
+          settings: userSettings,
         },
       };
 
@@ -70,7 +126,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute('href', dataStr);
       const dateStr = new Date().toISOString().split('T')[0];
-      downloadAnchor.setAttribute('download', `cadangan_pengingat_pembukuan_${dateStr}.json`);
+      downloadAnchor.setAttribute('download', `cadangan_${activeUserName.replace(/\s+/g, '_')}_${dateStr}.json`);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
@@ -93,10 +149,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       try {
         const json = JSON.parse(event.target?.result as string);
         if (json && json.data) {
-          const { reminders: impReminders, ledgers: impLedgers, transactions: impTransactions, scheduledWhatsApp: impWa } = json.data;
+          const { reminders: impReminders, ledgers: impLedgers, transactions: impTransactions, scheduledWhatsApp: impWa, settings: impSettings } = json.data;
 
           if (onDataImported) {
             onDataImported(impReminders, impLedgers, impTransactions, impWa);
+          }
+
+          if (impSettings && onUpdateUserSettings) {
+            onUpdateUserSettings({ ...impSettings, userId: activeUserId });
           }
 
           setBackupSuccessMessage('Data cadangan berhasil dipulihkan!');
@@ -110,21 +170,22 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       }
     };
     reader.readAsText(file);
-    // Reset file input
     e.target.value = '';
   };
 
   // Voice AI test
   const handleTestVoice = () => {
-    playNotificationChime();
+    if (currentPlayChime) {
+      playNotificationChime();
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(
-        'Halo! Ini adalah uji coba suara AI pengingat dari aplikasi Pengingat dan Pembukuan Anda.'
+        `Halo ${activeUserName}! Ini adalah uji coba suara asisten AI dengan gaya bicara ${currentVoiceTone}. Agenda dan catatan Anda siap diingatkan.`
       );
       utterance.lang = 'id-ID';
-      utterance.rate = 1.0;
-      utterance.pitch = 1.05;
+      utterance.rate = currentVoiceRate;
+      utterance.pitch = currentVoicePitch;
       window.speechSynthesis.speak(utterance);
     }
   };
@@ -138,6 +199,47 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         pendingRemindersCount={reminders.filter(r => !r.completed).length}
         pendingWhatsAppCount={scheduledWhatsApp.filter(w => w.status === 'pending').length}
       />
+
+      {/* Top Banner: Active Account Scope Notification */}
+      <div className="p-4 sm:p-5 rounded-3xl bg-white/80 backdrop-blur-xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-indigo-700 text-white flex items-center justify-center font-black text-lg shadow-md shadow-indigo-500/20">
+            {activeUserName.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-base font-black text-slate-900">
+                Pengaturan Akun: {activeUserName}
+              </h2>
+              <span className={`px-2.5 py-0.5 rounded-full text-2xs font-extrabold ${
+                isOwner ? 'bg-amber-100 text-amber-900 border border-amber-200' : 'bg-blue-100 text-blue-900 border border-blue-200'
+              }`}>
+                {isOwner ? 'Pemilik Usaha (Owner)' : 'Staf / Kasir'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Setiap akun pemilik memiliki data pengingat, pembukuan, nomor WhatsApp &amp; pengaturan yang berdiri sendiri.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => onNavigate('login')}
+          className="inline-flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer shadow-2xs self-start sm:self-center"
+        >
+          <User className="w-4 h-4" />
+          <span>Ganti Akun Pemilik / Staf</span>
+        </button>
+      </div>
+
+      {/* Settings Saved Notification Pill */}
+      {settingsSavedToast && (
+        <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center space-x-2 shadow-2xs animate-in fade-in duration-200">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>Pengaturan untuk akun {activeUserName} berhasil diperbarui!</span>
+        </div>
+      )}
 
       {/* 2. Top Navigation Tabs for Settings Page */}
       <div className="flex items-center space-x-2 p-1.5 rounded-2xl bg-white/70 backdrop-blur-xl border border-white/80 shadow-2xs overflow-x-auto">
@@ -169,15 +271,28 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
         <button
           type="button"
+          onClick={() => setActiveSettingsSection('automation')}
+          className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer ${
+            activeSettingsSection === 'automation'
+              ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-sm shadow-teal-500/25'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          <span>Otomasi &amp; Anti-Spam</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveSettingsSection('backup')}
           className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer ${
             activeSettingsSection === 'backup'
-              ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-sm shadow-indigo-500/25'
+              ? 'bg-gradient-to-r from-slate-700 to-slate-900 text-white shadow-sm shadow-slate-700/25'
               : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
           }`}
         >
           <Database className="w-4 h-4" />
-          <span>Cadangan &amp; Pemulihan Data</span>
+          <span>Cadangan &amp; Pemulihan</span>
         </button>
 
         <button
@@ -195,71 +310,266 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       </div>
 
       {/* 3. Main Content based on active section */}
+      {/* SECTION 1: WHATSAPP SCAN QR */}
       {activeSettingsSection === 'gateway' && (
         <div className="space-y-6">
-          {/* Informational Banner */}
           <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/50 border border-emerald-200/80 text-slate-800 flex items-start space-x-3.5 shadow-2xs">
             <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm shadow-emerald-600/30">
               <Zap className="w-5 h-5" />
             </div>
             <div className="space-y-1">
               <h3 className="text-sm font-extrabold text-slate-900">
-                Integrasi WhatsApp Mandiri (Scan Barcode Ponsel Sendiri)
+                Integrasi WhatsApp Mandiri untuk {activeUserName}
               </h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Aplikasi ini terhubung langsung ke nomor WhatsApp Anda sendiri seperti WhatsApp Web. 
-                Tanpa perlu API key atau perantara pihak ketiga, Anda cukup scan QR di bawah sekali saja untuk mengaktifkan pengiriman pesan otomatis di latar belakang.
+                Scan QR di bawah ini dari HP Anda sendiri untuk mengaktifkan koneksi WhatsApp khusus akun <strong>{activeUserName}</strong>. 
+                Sesi tidak akan bercampur dengan akun pemilik lainnya.
               </p>
             </div>
           </div>
 
-          {/* Self-Hosted WhatsApp QR Scanner & Live Tester */}
-          <WhatsAppQRSettingsCard />
+          {/* User-Scoped WhatsApp QR Scanner & Live Tester */}
+          <WhatsAppQRSettingsCard 
+            userId={activeUserId}
+            userName={activeUserName}
+            userRole={currentUser?.role || 'owner'}
+          />
         </div>
       )}
 
+      {/* SECTION 2: SUARA AI & ALARM */}
       {activeSettingsSection === 'voice' && (
         <div className="space-y-6">
-          <div className="p-6 rounded-3xl bg-white/75 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-5">
+          <div className="p-6 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6">
             <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
               <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center shrink-0">
                 <Volume2 className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  Pengaturan Suara Pengingat AI &amp; Alarm
+                  Pengaturan Suara Pengingat AI &amp; Alarm ({activeUserName})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Uji coba dan dengarkan suara asisten AI yang akan membacakan judul dan catatan agenda Anda.
+                  Konfigurasi suara asisten AI yang akan membacakan judul dan catatan agenda Anda.
                 </p>
               </div>
             </div>
 
-            <div className="space-y-4 max-w-xl">
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Toggle Asisten Suara AI */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800">Uji Suara Asisten AI (Speech Synthesis)</span>
-                  <span className="px-2 py-0.5 rounded-full text-3xs font-extrabold bg-emerald-100 text-emerald-800">
-                    Bahasa Indonesia
-                  </span>
+                  <span className="text-xs font-bold text-slate-800">Asisten Suara AI (Bicara Otomatis)</span>
+                  <input
+                    type="checkbox"
+                    checked={currentEnableVoice}
+                    onChange={(e) => updateSetting({ enableVoiceAssistant: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                  />
                 </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Ketika alarm pengingat berbunyi, aplikasi akan memainkan nada lonceng (*chime*) lalu mengucapkan teks pengingat secara otomatis.
+                <p className="text-2xs text-slate-500">
+                  Membacakan pesan pengingat dengan suara sintetis saat alarm agenda berbunyi.
                 </p>
-                <button
-                  type="button"
-                  onClick={handleTestVoice}
-                  className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-sm shadow-indigo-600/25 cursor-pointer"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Dengarkan Contoh Suara AI</span>
-                </button>
               </div>
 
+              {/* Toggle Lonceng Chime */}
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
-                <span className="text-xs font-bold text-slate-800">Notifikasi Pop-up Peramban (Push Alerts)</span>
-                <p className="text-xs text-slate-600">
-                  Untuk mendapatkan pengingat saat layar terkunci atau aplikasi berada di latar belakang, pastikan izin notifikasi peramban telah diberikan.
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">Bunyi Nada Lonceng (Chime Alarm)</span>
+                  <input
+                    type="checkbox"
+                    checked={currentPlayChime}
+                    onChange={(e) => updateSetting({ playChime: e.target.checked })}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                  />
+                </div>
+                <p className="text-2xs text-slate-500">
+                  Memainkan alunan nada melodi elegan sebelum suara AI berbicara.
+                </p>
+              </div>
+
+              {/* Gaya Nada Suara AI */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3 md:col-span-2">
+                <span className="text-xs font-bold text-slate-800">Gaya Nada Suara Asisten AI:</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { id: 'friendly', label: 'Ramah & Santun', desc: 'Hangat & bersahabat' },
+                    { id: 'professional', label: 'Profesional', desc: 'Tegas & lugas' },
+                    { id: 'urgent', label: 'Mendesak (Tegas)', desc: 'Prioritas tinggi' },
+                    { id: 'cheerful', label: 'Ceria & Semangat', desc: 'Energik & positif' },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => updateSetting({ voiceTone: t.id as any })}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        currentVoiceTone === t.id
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{t.label}</div>
+                      <div className={`text-3xs mt-0.5 ${currentVoiceTone === t.id ? 'text-indigo-100' : 'text-slate-400'}`}>
+                        {t.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Kecepatan Suara (Rate) */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800">Kecepatan Bicara (Speed):</span>
+                  <span className="font-mono font-bold text-indigo-600">{currentVoiceRate.toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.8"
+                  max="1.2"
+                  step="0.05"
+                  value={currentVoiceRate}
+                  onChange={(e) => updateSetting({ voiceRate: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600 cursor-pointer"
+                />
+                <div className="flex justify-between text-3xs text-slate-400">
+                  <span>Perlahan (0.8x)</span>
+                  <span>Normal (1.0x)</span>
+                  <span>Cepat (1.2x)</span>
+                </div>
+              </div>
+
+              {/* Tinggi Nada (Pitch) */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-800">Tinggi Nada (Pitch):</span>
+                  <span className="font-mono font-bold text-indigo-600">{currentVoicePitch.toFixed(2)}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.8"
+                  max="1.2"
+                  step="0.05"
+                  value={currentVoicePitch}
+                  onChange={(e) => updateSetting({ voicePitch: parseFloat(e.target.value) })}
+                  className="w-full accent-indigo-600 cursor-pointer"
+                />
+                <div className="flex justify-between text-3xs text-slate-400">
+                  <span>Berat (0.8)</span>
+                  <span>Normal (1.0)</span>
+                  <span>Tinggi (1.2)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Test Voice Button */}
+            <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
+              <span className="text-2xs text-slate-500">
+                Pengaturan suara di atas disimpan khusus untuk akun <strong>{activeUserName}</strong>.
+              </span>
+              <button
+                type="button"
+                onClick={handleTestVoice}
+                className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-sm shadow-indigo-600/25 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Uji Suara Asisten AI Akun Ini</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 3: OTOMASI & ANTI-SPAM */}
+      {activeSettingsSection === 'automation' && (
+        <div className="space-y-6">
+          <div className="p-6 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6">
+            <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
+              <div className="w-10 h-10 rounded-2xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
+                <Sliders className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Preferensi Otomasi &amp; Anti-Spam WhatsApp ({activeUserName})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Atur perilaku otomatisasi pengiriman pesan WhatsApp dan proteksi jeda nomor.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Toggle Kirim Otomatis di Latar Belakang */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">
+                    Kirim Otomatis Saat Jadwal Tiba (Background Auto-Send)
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={currentAutoSend}
+                    onChange={(e) => updateSetting({ autoSendEnabled: e.target.checked })}
+                    className="w-4 h-4 text-teal-600 rounded border-slate-300 focus:ring-teal-500 cursor-pointer"
+                  />
+                </div>
+                <p className="text-2xs text-slate-500 leading-relaxed">
+                  Jika aktif, pesan WhatsApp terjadwal akan langsung dikirim oleh sistem saat jam jatuh tempo tiba tanpa perlu membuka tab WhatsApp atau klik tombol kirim manual.
+                </p>
+              </div>
+
+              {/* Pilihan Jeda Anti-Spam Default */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+                <div className="flex items-center space-x-2">
+                  <Timer className="w-4 h-4 text-teal-600" />
+                  <span className="text-xs font-bold text-slate-800">
+                    Jeda Anti-Spam Default Pengiriman Banyak Nomor:
+                  </span>
+                </div>
+                <p className="text-2xs text-slate-500">
+                  Beri jeda bertahap antar pengiriman nomor agar akun WhatsApp Anda terhindar dari deteksi spam / pemblokiran.
+                </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { value: 5, label: '5 Menit', desc: 'Standar ringan' },
+                    { value: 10, label: '10 Menit', desc: 'Rekomendasi aman' },
+                    { value: 20, label: '20 Menit', desc: 'Sangat aman' },
+                    { value: 30, label: '30 Menit', desc: 'Maksimal santai' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => updateSetting({ antiSpamIntervalMinutes: opt.value as any })}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                        currentAntiSpam === opt.value
+                          ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-teal-300'
+                      }`}
+                    >
+                      <div className="text-xs font-bold">{opt.label}</div>
+                      <div className={`text-3xs mt-0.5 ${currentAntiSpam === opt.value ? 'text-teal-100' : 'text-slate-400'}`}>
+                        {opt.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Notifikasi Pop-up Browser */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800">
+                    Notifikasi Desktop / Pop-up Peramban
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={currentBrowserNotif}
+                    onChange={(e) => updateSetting({ browserNotifications: e.target.checked })}
+                    className="w-4 h-4 text-teal-600 rounded border-slate-300 focus:ring-teal-500 cursor-pointer"
+                  />
+                </div>
+                <p className="text-2xs text-slate-500">
+                  Menampilkan pemberitahuan pop-up saat pesan berhasil dikirim atau saat ada pengingat agenda.
                 </p>
               </div>
             </div>
@@ -267,6 +577,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         </div>
       )}
 
+      {/* SECTION 4: CADANGAN & PEMULIHAN */}
       {activeSettingsSection === 'backup' && (
         <div className="space-y-6">
           {backupSuccessMessage && (
@@ -283,17 +594,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </div>
           )}
 
-          <div className="p-6 rounded-3xl bg-white/75 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6">
+          <div className="p-6 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6">
             <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
               <div className="w-10 h-10 rounded-2xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
                 <Database className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-base font-extrabold text-slate-900">
-                  Pencadangan &amp; Pemulihan Data
+                  Pencadangan &amp; Pemulihan Data Akun ({activeUserName})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Simpan cadangan seluruh data pengingat, buku kas, transaksi, dan jadwal WhatsApp Anda ke dalam file JSON lokal.
+                  Simpan cadangan data pengingat, buku kas, transaksi, dan jadwal WhatsApp khusus akun ini ke file JSON.
                 </p>
               </div>
             </div>
@@ -326,12 +637,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-bold shadow-md shadow-slate-900/20 transition-all cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>Unduh File Cadangan (JSON)</span>
+                <span>Unduh File Cadangan ({activeUserName})</span>
               </button>
 
               <label className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 text-xs sm:text-sm font-bold shadow-2xs transition-all cursor-pointer">
                 <Upload className="w-4 h-4 text-indigo-600" />
-                <span>Pulihkan Data dari Cadangan</span>
+                <span>Pulihkan Data dari File JSON</span>
                 <input
                   type="file"
                   accept=".json"
@@ -344,10 +655,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         </div>
       )}
 
-      {/* 4. Section: PWA Install Guide & Status */}
+      {/* SECTION 5: INSTALL APLIKASI (PWA) */}
       {activeSettingsSection === 'pwa' && (
         <div className="space-y-6">
-          <div className="p-6 rounded-3xl bg-white/75 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6">
+          <div className="p-6 rounded-3xl bg-white/80 backdrop-blur-xl border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] space-y-6">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center shrink-0">
@@ -420,3 +731,5 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     </div>
   );
 };
+
+export default SettingsPage;

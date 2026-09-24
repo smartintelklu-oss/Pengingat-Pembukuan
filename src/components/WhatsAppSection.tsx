@@ -21,7 +21,8 @@ import {
   Zap,
   RefreshCw,
   Rocket,
-  Radio
+  Radio,
+  QrCode
 } from 'lucide-react';
 import { ScheduledWhatsApp, WhatsAppTextType } from '../types';
 import { 
@@ -43,6 +44,8 @@ interface WhatsAppSectionProps {
   onSendNow: (item: ScheduledWhatsApp) => void;
   onSendViaGateway?: (item: ScheduledWhatsApp) => Promise<{ success: boolean; message: string; provider?: string }>;
   onOpenSettings?: () => void;
+  userId?: string;
+  userName?: string;
 }
 
 export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
@@ -54,6 +57,8 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
   onSendNow,
   onSendViaGateway,
   onOpenSettings,
+  userId = 'user-utama',
+  userName = 'Pemilik Usaha',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'recurring' | 'sent'>('all');
@@ -62,6 +67,7 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
 
   // Self-Hosted WhatsApp Connection State
   const [waState, setWaState] = useState<WhatsAppState>({
+    userId,
     status: 'disconnected',
     isConnected: false,
     qrCode: null,
@@ -79,7 +85,7 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
 
   const fetchStatus = async () => {
     try {
-      const state = await getWhatsAppStatus();
+      const state = await getWhatsAppStatus(userId);
       setWaState(state);
     } catch (err) {
       // ignore
@@ -88,9 +94,9 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(fetchStatus, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [userId]);
 
   // Statistics calculation
   const totalCount = items.length;
@@ -203,7 +209,7 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
             <button
               type="button"
               onClick={onOpenSettings}
-              title="Klik untuk membuka pengaturan integrasi WhatsApp"
+              title={`Klik untuk membuka pengaturan WhatsApp akun ${userName}`}
               className={`px-3 py-1 rounded-full text-2xs font-bold border inline-flex items-center space-x-1.5 transition-all cursor-pointer ${
                 waState.isConnected 
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
@@ -213,8 +219,8 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
               <span className={`w-1.5 h-1.5 rounded-full ${waState.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
               <span>
                 {waState.isConnected 
-                  ? `WhatsApp HP Terhubung (+${waState.phoneNumber || 'Aktif'})` 
-                  : 'WhatsApp Belum Tertaut (Klik Scan QR)'}
+                  ? `WA ${userName} Terhubung (+${waState.phoneNumber || 'Aktif'})` 
+                  : `WA ${userName} Belum Tertaut (Scan QR)`}
               </span>
             </button>
           </div>
@@ -266,6 +272,33 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
           <span className="text-3xs text-slate-400">Pesan berhasil dikirim</span>
         </div>
       </div>
+
+      {/* Unlinked WhatsApp Banner Guide */}
+      {!waState.isConnected && (
+        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-amber-500/10 border border-emerald-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-300">
+          <div className="flex items-center space-x-3.5">
+            <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-emerald-500/20">
+              <QrCode className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-black text-slate-900">
+                WhatsApp Akun {userName} Belum Tertaut (Scan QR Mandiri)
+              </p>
+              <p className="text-2xs sm:text-xs text-slate-500 mt-0.5">
+                Tautkan WhatsApp langsung dari ponsel Anda agar setiap pesan terjadwal otomatis terkirim tanpa aplikasi pihak ketiga.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className="inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm shadow-emerald-600/20 shrink-0 cursor-pointer"
+          >
+            <QrCode className="w-4 h-4" />
+            <span>Tampilkan Kode QR WhatsApp</span>
+          </button>
+        </div>
+      )}
 
       {/* Global Feedback Banner for Gateway Direct Sends */}
       {gatewayFeedback && (
