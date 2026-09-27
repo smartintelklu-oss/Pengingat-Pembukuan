@@ -64,9 +64,15 @@ export const WhatsAppQRSettingsCard: React.FC<WhatsAppQRSettingsCardProps> = ({
   const fetchStatus = async (targetUserId = userId) => {
     try {
       const state = await getWhatsAppStatus(targetUserId);
-      setWaState(state);
-    } catch (err: any) {
-      console.error(`Error fetching WA status for ${targetUserId}:`, err);
+      setWaState((prev) => {
+        // Prevent QR code flicker during temporary poll hiccups
+        if (!state.qrCode && prev.qrCode && state.status === 'connecting' && !state.isConnected) {
+          return { ...state, qrCode: prev.qrCode, status: 'qr_ready' };
+        }
+        return state;
+      });
+    } catch {
+      // ignore
     }
   };
 
@@ -123,25 +129,29 @@ export const WhatsAppQRSettingsCard: React.FC<WhatsAppQRSettingsCardProps> = ({
       const state = await connectWhatsApp(userId, forceFresh);
       setWaState(state);
 
-      // If socket is still generating QR, poll actively every 1.5s
+      // If socket is still generating QR, poll actively every 1.2s until ready
       if (!state.qrCode && !state.isConnected) {
         let attempts = 0;
         const checkTimer = setInterval(async () => {
           attempts++;
           const latest = await getWhatsAppStatus(userId);
-          if (latest.qrCode || latest.isConnected || attempts > 10) {
+          if (latest.qrCode || latest.isConnected) {
             clearInterval(checkTimer);
             setWaState(latest);
             setIsLoading(false);
+          } else if (attempts >= 15) {
+            clearInterval(checkTimer);
+            setIsLoading(false);
           }
-        }, 1500);
+        }, 1200);
         return;
       }
-    } catch (err: any) {
+    } catch {
+      // Keep in connecting mode so polling catches up smoothly
       setWaState((prev) => ({
         ...prev,
-        status: 'disconnected',
-        lastError: humanizeErrorMessage(err.message) || 'Gagal memulai koneksi WhatsApp.',
+        status: 'connecting',
+        lastError: null,
       }));
     } finally {
       setIsLoading(false);

@@ -59,23 +59,26 @@ export interface GatewaySendResult {
   provider?: string;
 }
 
+// In-memory cache of the latest valid QR code per user to prevent flickering
+const lastKnownQrMap: Record<string, string | null> = {};
+
 /**
- * Safely parses response text into JSON without throwing raw SyntaxError
+ * Safely parses response text into JSON without throwing raw SyntaxError or leaking HTML
  */
 async function safeParseJson(res: Response): Promise<any> {
-  const text = await res.text();
-  if (!text || !text.trim()) {
-    throw new Error('Respons server kosong. Sedang mencoba ulang...');
-  }
-  const trimmed = text.trim();
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
-    // Non-JSON response (e.g. HTML or proxy error page during restart)
-    throw new Error('Layanan WhatsApp backend sedang memulai ulang. Sedang menghubungkan...');
-  }
   try {
+    const text = await res.text();
+    if (!text || !text.trim()) {
+      return null;
+    }
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      // Non-JSON response (e.g. HTML proxy error page or warmup page)
+      return null;
+    }
     return JSON.parse(trimmed);
   } catch {
-    throw new Error('Gagal memproses format data server WhatsApp. Sedang mencoba ulang...');
+    return null;
   }
 }
 
@@ -85,8 +88,8 @@ async function safeParseJson(res: Response): Promise<any> {
 export function humanizeErrorMessage(errMsg: string | null | undefined): string | null {
   if (!errMsg) return null;
   const lower = errMsg.toLowerCase();
-  if (lower.includes('unexpected token') || lower.includes('not valid json') || lower.includes('the page')) {
-    return 'Server WhatsApp sedang memulai ulang atau menyiapkan sesi. Silakan coba kembali dalam beberapa detik.';
+  if (lower.includes('unexpected token') || lower.includes('not valid json') || lower.includes('the page') || lower.includes('memulai ulang')) {
+    return null; // Suppress technical or restart messages so UI transitions cleanly to connecting
   }
   if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('load failed')) {
     return 'Koneksi jaringan ke server terputus. Memeriksa kembali sambungan...';
@@ -95,53 +98,52 @@ export function humanizeErrorMessage(errMsg: string | null | undefined): string 
 }
 
 /**
- * Fetches the current WhatsApp connection status for a specific user from the backend with auto-retry
+ * Fetches the current WhatsApp connection status for a specific user from the backend
  */
 export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<WhatsAppState> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(`/api/whatsapp/status?userId=${encodeURIComponent(userId)}`, {
-        headers: {
-          'Accept': 'application/json',
-          'x-user-id': userId,
-        },
-      });
+  try {
+    const res = await fetch(`/api/whatsapp/status?userId=${encodeURIComponent(userId)}`, {
+      headers: {
+        'Accept': 'application/json',
+        'x-user-id': userId,
+      },
+    });
 
-      if (!res.ok && attempt === 0) {
-        await new Promise((r) => setTimeout(r, 1200));
-        continue;
+    const data = await safeParseJson(res);
+    if (data && typeof data === 'object') {
+      const normalized = normalizeWhatsAppState(data, userId);
+      if (normalized.qrCode) {
+        lastKnownQrMap[userId] = normalized.qrCode;
       }
-
-      const data = await safeParseJson(res);
-      return normalizeWhatsAppState(data, userId);
-    } catch (err: any) {
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 1200));
-        continue;
+      if (normalized.isConnected) {
+        lastKnownQrMap[userId] = null;
       }
-      return {
-        userId,
-        status: 'disconnected',
-        isConnected: false,
-        qrCode: null,
-        phoneNumber: null,
-        pushName: null,
-        lastConnectedAt: null,
-        lastError: humanizeErrorMessage(err.message),
-      };
+      return normalized;
     }
-  }
 
-  return {
-    userId,
-    status: 'disconnected',
-    isConnected: false,
-    qrCode: null,
-    phoneNumber: null,
-    pushName: null,
-    lastConnectedAt: null,
-    lastError: 'Sedang menghubungkan ke server WhatsApp...',
-  };
+    // If server returned non-JSON (e.g. warmup HTML during container start), retain connecting state
+    return {
+      userId,
+      status: lastKnownQrMap[userId] ? 'qr_ready' : 'connecting',
+      isConnected: false,
+      qrCode: lastKnownQrMap[userId] || null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: null,
+    };
+  } catch {
+    return {
+      userId,
+      status: lastKnownQrMap[userId] ? 'qr_ready' : 'connecting',
+      isConnected: false,
+      qrCode: lastKnownQrMap[userId] || null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: null,
+    };
+  }
 }
 
 /**
@@ -149,6 +151,10 @@ export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<
  * Ensures the response from the server is verified before returning with auto-retry.
  */
 export async function connectWhatsApp(userId: string = 'user-utama', forceFresh: boolean = false): Promise<WhatsAppState> {
+  if (forceFresh) {
+    lastKnownQrMap[userId] = null;
+  }
+
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch('/api/whatsapp/connect', {
@@ -161,40 +167,37 @@ export async function connectWhatsApp(userId: string = 'user-utama', forceFresh:
         body: JSON.stringify({ userId, forceFresh: attempt > 0 ? false : forceFresh }),
       });
 
-      if (!res.ok && attempt === 0) {
-        await new Promise((r) => setTimeout(r, 1500));
-        continue;
+      const data = await safeParseJson(res);
+      if (data && typeof data === 'object') {
+        const normalized = normalizeWhatsAppState(data, userId);
+        if (normalized.qrCode) {
+          lastKnownQrMap[userId] = normalized.qrCode;
+        }
+        return normalized;
       }
 
-      const data = await safeParseJson(res);
-      return normalizeWhatsAppState(data, userId);
-    } catch (err: any) {
       if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 1000));
         continue;
       }
-      return {
-        userId,
-        status: 'disconnected',
-        isConnected: false,
-        qrCode: null,
-        phoneNumber: null,
-        pushName: null,
-        lastConnectedAt: null,
-        lastError: humanizeErrorMessage(err.message),
-      };
+    } catch {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
     }
   }
 
+  // Gracefully transition to connecting state with last known QR if available
   return {
     userId,
-    status: 'disconnected',
+    status: lastKnownQrMap[userId] ? 'qr_ready' : 'connecting',
     isConnected: false,
-    qrCode: null,
+    qrCode: lastKnownQrMap[userId] || null,
     phoneNumber: null,
     pushName: null,
     lastConnectedAt: null,
-    lastError: 'Gagal menghubungkan ke server WhatsApp. Silakan coba kembali.',
+    lastError: null,
   };
 }
 

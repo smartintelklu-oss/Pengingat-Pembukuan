@@ -72,7 +72,7 @@ export class WhatsAppGatewayManager {
     }
   }
 
-  private waitForReadiness(timeoutMs = 9000): Promise<WhatsAppState> {
+  private waitForReadiness(timeoutMs = 2500): Promise<WhatsAppState> {
     // If already in a definitive terminal state, return immediately
     if (this.status === "connected" || (this.status === "qr_ready" && Boolean(this.qrCode))) {
       return Promise.resolve(this.getState());
@@ -92,11 +92,7 @@ export class WhatsAppGatewayManager {
       timer = setTimeout(() => {
         if (resolved) return;
         resolved = true;
-        // If timed out still without QR or connection, transition out of hanging 'connecting' state
-        if (this.status === "connecting" && !this.qrCode) {
-          this.status = "disconnected";
-          this.lastError = "Batas waktu pembuatan Kode QR terlampaui. Silakan klik 'Perbarui Barcode QR'.";
-        }
+        // Don't mark as error if still initializing; client polling will pick up the QR
         resolve(this.getState());
       }, timeoutMs);
 
@@ -286,8 +282,8 @@ export class WhatsAppGatewayManager {
         }
       });
 
-      // Wait until socket readiness is reached (QR code ready, connection opened, or timeout)
-      return await this.waitForReadiness(15000);
+      // Wait briefly for socket readiness or return immediately so client can poll without proxy timeout
+      return await this.waitForReadiness(2500);
     } catch (err: any) {
       console.error(`[WhatsApp:${this.userId}] Error initializing socket:`, err);
       this.status = "disconnected";
