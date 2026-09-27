@@ -60,75 +60,140 @@ export interface GatewaySendResult {
 }
 
 /**
- * Fetches the current WhatsApp connection status for a specific user from the backend
+ * Safely parses response text into JSON without throwing raw SyntaxError
  */
-export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<WhatsAppState> {
+async function safeParseJson(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text || !text.trim()) {
+    throw new Error('Respons server kosong. Sedang mencoba ulang...');
+  }
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    // Non-JSON response (e.g. HTML or proxy error page during restart)
+    throw new Error('Layanan WhatsApp backend sedang memulai ulang. Sedang menghubungkan...');
+  }
   try {
-    const res = await fetch(`/api/whatsapp/status?userId=${encodeURIComponent(userId)}`, {
-      headers: {
-        'x-user-id': userId,
-      },
-    });
-
-    const text = await res.text();
-    let data: any = null;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(text.startsWith('<') ? 'Server backend belum siap (menerima HTML).' : 'Respons server bukan format JSON yang valid.');
-    }
-
-    return normalizeWhatsAppState(data, userId);
-  } catch (err: any) {
-    return {
-      userId,
-      status: 'disconnected',
-      isConnected: false,
-      qrCode: null,
-      phoneNumber: null,
-      pushName: null,
-      lastConnectedAt: null,
-      lastError: err.message || 'Gagal menghubungi server WhatsApp backend.',
-    };
+    return JSON.parse(trimmed);
+  } catch {
+    throw new Error('Gagal memproses format data server WhatsApp. Sedang mencoba ulang...');
   }
 }
 
 /**
+ * Clean and humanize error messages so raw JSON/SyntaxError never appears in UI
+ */
+export function humanizeErrorMessage(errMsg: string | null | undefined): string | null {
+  if (!errMsg) return null;
+  const lower = errMsg.toLowerCase();
+  if (lower.includes('unexpected token') || lower.includes('not valid json') || lower.includes('the page')) {
+    return 'Server WhatsApp sedang memulai ulang atau menyiapkan sesi. Silakan coba kembali dalam beberapa detik.';
+  }
+  if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('load failed')) {
+    return 'Koneksi jaringan ke server terputus. Memeriksa kembali sambungan...';
+  }
+  return errMsg;
+}
+
+/**
+ * Fetches the current WhatsApp connection status for a specific user from the backend with auto-retry
+ */
+export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<WhatsAppState> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`/api/whatsapp/status?userId=${encodeURIComponent(userId)}`, {
+        headers: {
+          'x-user-id': userId,
+        },
+      });
+
+      if (!res.ok && attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+
+      const data = await safeParseJson(res);
+      return normalizeWhatsAppState(data, userId);
+    } catch (err: any) {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+      return {
+        userId,
+        status: 'disconnected',
+        isConnected: false,
+        qrCode: null,
+        phoneNumber: null,
+        pushName: null,
+        lastConnectedAt: null,
+        lastError: humanizeErrorMessage(err.message),
+      };
+    }
+  }
+
+  return {
+    userId,
+    status: 'disconnected',
+    isConnected: false,
+    qrCode: null,
+    phoneNumber: null,
+    pushName: null,
+    lastConnectedAt: null,
+    lastError: 'Sedang menghubungkan ke server WhatsApp...',
+  };
+}
+
+/**
  * Initializes or starts WhatsApp connection / generates a fresh QR code for a specific user.
- * Ensures the response from the server is verified before returning.
+ * Ensures the response from the server is verified before returning with auto-retry.
  */
 export async function connectWhatsApp(userId: string = 'user-utama', forceFresh: boolean = false): Promise<WhatsAppState> {
-  try {
-    const res = await fetch('/api/whatsapp/connect', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-user-id': userId,
-      },
-      body: JSON.stringify({ userId, forceFresh }),
-    });
-
-    const text = await res.text();
-    let data: any = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      data = JSON.parse(text);
-    } catch {
-      throw new Error(text.startsWith('<') ? 'Server backend sedang memulai ulang. Silakan coba beberapa detik lagi.' : 'Respons server bukan format JSON yang valid.');
-    }
+      const res = await fetch('/api/whatsapp/connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+        },
+        body: JSON.stringify({ userId, forceFresh: attempt > 0 ? false : forceFresh }),
+      });
 
-    return normalizeWhatsAppState(data, userId);
-  } catch (err: any) {
-    return {
-      userId,
-      status: 'disconnected',
-      isConnected: false,
-      qrCode: null,
-      phoneNumber: null,
-      pushName: null,
-      lastConnectedAt: null,
-      lastError: err.message || 'Gagal memulai koneksi WhatsApp.',
-    };
+      if (!res.ok && attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+
+      const data = await safeParseJson(res);
+      return normalizeWhatsAppState(data, userId);
+    } catch (err: any) {
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 1500));
+        continue;
+      }
+      return {
+        userId,
+        status: 'disconnected',
+        isConnected: false,
+        qrCode: null,
+        phoneNumber: null,
+        pushName: null,
+        lastConnectedAt: null,
+        lastError: humanizeErrorMessage(err.message),
+      };
+    }
   }
+
+  return {
+    userId,
+    status: 'disconnected',
+    isConnected: false,
+    qrCode: null,
+    phoneNumber: null,
+    pushName: null,
+    lastConnectedAt: null,
+    lastError: 'Gagal menghubungkan ke server WhatsApp. Silakan coba kembali.',
+  };
 }
 
 /**

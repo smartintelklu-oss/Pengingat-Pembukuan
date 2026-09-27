@@ -18,6 +18,7 @@ import {
   connectWhatsApp,
   disconnectWhatsApp,
   sendViaActiveGateway,
+  humanizeErrorMessage,
   WhatsAppState,
 } from '../utils/whatsappGateway';
 
@@ -121,11 +122,26 @@ export const WhatsAppQRSettingsCard: React.FC<WhatsAppQRSettingsCardProps> = ({
     try {
       const state = await connectWhatsApp(userId, forceFresh);
       setWaState(state);
+
+      // If socket is still generating QR, poll actively every 1.5s
+      if (!state.qrCode && !state.isConnected) {
+        let attempts = 0;
+        const checkTimer = setInterval(async () => {
+          attempts++;
+          const latest = await getWhatsAppStatus(userId);
+          if (latest.qrCode || latest.isConnected || attempts > 10) {
+            clearInterval(checkTimer);
+            setWaState(latest);
+            setIsLoading(false);
+          }
+        }, 1500);
+        return;
+      }
     } catch (err: any) {
       setWaState((prev) => ({
         ...prev,
         status: 'disconnected',
-        lastError: err.message || 'Gagal memulai koneksi WhatsApp.',
+        lastError: humanizeErrorMessage(err.message) || 'Gagal memulai koneksi WhatsApp.',
       }));
     } finally {
       setIsLoading(false);
@@ -270,12 +286,21 @@ export const WhatsAppQRSettingsCard: React.FC<WhatsAppQRSettingsCardProps> = ({
 
         {/* Error Alert if any */}
         {waState.lastError && (
-          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start space-x-3">
-            <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-bold">Informasi Koneksi:</p>
-              <p>{waState.lastError}</p>
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-200">
+            <div className="flex items-start space-x-3">
+              <AlertCircle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-bold">Informasi Koneksi:</p>
+                <p>{humanizeErrorMessage(waState.lastError)}</p>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => handleConnect(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-2xs transition-all shadow-2xs self-start sm:self-auto shrink-0 cursor-pointer"
+            >
+              Coba Hubungkan Ulang
+            </button>
           </div>
         )}
 
@@ -493,7 +518,7 @@ export const WhatsAppQRSettingsCard: React.FC<WhatsAppQRSettingsCardProps> = ({
               <button
                 id="btn-start-wa-qr"
                 type="button"
-                onClick={() => handleConnect(false)}
+                onClick={() => handleConnect(true)}
                 disabled={isLoading}
                 className="inline-flex items-center justify-center space-x-2.5 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-60"
               >
