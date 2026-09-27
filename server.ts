@@ -154,17 +154,28 @@ Berikan output dalam format JSON valid dengan struktur:
 });
 
 // API: Self-Hosted WhatsApp Gateway (Multi-Device & Multi-Session per Owner Account)
-// Enforce valid JSON and disable caching on all /api/whatsapp routes
-app.use("/api/whatsapp", (req, res, next) => {
+// Dedicated router with strict JSON enforcement so no HTML or non-JSON response can leak
+const whatsappRouter = express.Router();
+
+whatsappRouter.use((req, res, next) => {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   next();
 });
 
-// 1. Get current WhatsApp connection status, QR code, and linked profile for a specific user
-app.get("/api/whatsapp/status", (req, res) => {
+// Helper to safely extract userId
+function extractUserId(req: express.Request): string {
+  const fromBody = typeof req.body === "object" && req.body !== null ? req.body.userId : null;
+  const fromQuery = typeof req.query.userId === "string" ? req.query.userId : null;
+  const fromHeader = req.headers["x-user-id"];
+  const rawId = fromBody || fromQuery || (typeof fromHeader === "string" ? fromHeader : "user-utama");
+  return sanitizeUserId(rawId);
+}
+
+// 1. Get current WhatsApp connection status (support both GET and POST)
+whatsappRouter.all("/status", (req, res) => {
   try {
-    const userId = (req.query.userId as string) || (req.headers["x-user-id"] as string) || "user-utama";
+    const userId = extractUserId(req);
     const manager = getWhatsAppManager(userId);
     res.json(manager.getState());
   } catch (error: any) {
@@ -181,12 +192,12 @@ app.get("/api/whatsapp/status", (req, res) => {
   }
 });
 
-// 2. Start connection or generate a new QR code for scanning for this user
-app.post("/api/whatsapp/connect", async (req, res) => {
-  const userId = req.body?.userId || (req.headers["x-user-id"] as string) || "user-utama";
+// 2. Start connection or generate QR code (support both POST and GET)
+whatsappRouter.all("/connect", async (req, res) => {
+  const userId = extractUserId(req);
   const manager = getWhatsAppManager(userId);
   try {
-    const forceFresh = req.body?.forceFresh === true;
+    const forceFresh = req.body?.forceFresh === true || req.query?.forceFresh === "true";
     const state = await manager.init(forceFresh);
     res.json(state);
   } catch (error: any) {
@@ -204,9 +215,9 @@ app.post("/api/whatsapp/connect", async (req, res) => {
   }
 });
 
-// 3. Disconnect / logout WhatsApp session for this user
-app.post("/api/whatsapp/disconnect", async (req, res) => {
-  const userId = req.body?.userId || (req.headers["x-user-id"] as string) || "user-utama";
+// 3. Disconnect / logout WhatsApp session (support both POST and GET)
+whatsappRouter.all("/disconnect", async (req, res) => {
+  const userId = extractUserId(req);
   const manager = getWhatsAppManager(userId);
   try {
     await manager.logout();
@@ -225,8 +236,8 @@ app.post("/api/whatsapp/disconnect", async (req, res) => {
 });
 
 // 4. Send WhatsApp message directly through this user's linked session
-app.post("/api/whatsapp/send", async (req, res) => {
-  const userId = req.body?.userId || (req.headers["x-user-id"] as string) || "user-utama";
+whatsappRouter.post("/send", async (req, res) => {
+  const userId = extractUserId(req);
   const manager = getWhatsAppManager(userId);
   try {
     const { target, message } = req.body;
@@ -250,6 +261,43 @@ app.post("/api/whatsapp/send", async (req, res) => {
       message: error.message || "Terjadi kesalahan internal saat mengirim pesan WhatsApp.",
     });
   }
+});
+
+// Catch-all for WhatsApp router so NO /api/whatsapp route can ever return HTML
+whatsappRouter.all("*", (req, res) => {
+  res.status(404).json({
+    status: "disconnected",
+    isConnected: false,
+    qrCode: null,
+    lastError: `Rute WhatsApp ${req.method} ${req.originalUrl} tidak ditemukan.`,
+  });
+});
+
+app.use("/api/whatsapp", whatsappRouter);
+
+// Block ANY other /api/* request from ever hitting Vite or sending HTML
+app.all("/api/*", (req, res) => {
+  res.status(404).setHeader("Content-Type", "application/json; charset=utf-8").json({
+    error: true,
+    message: `API route ${req.method} ${req.originalUrl} tidak ditemukan.`,
+  });
+});
+
+// Global API error handler ensuring valid JSON on errors
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (req.path.startsWith("/api/")) {
+    console.error(`[API Global Error] ${req.method} ${req.path}:`, err);
+    if (!res.headersSent) {
+      return res.status(500).setHeader("Content-Type", "application/json; charset=utf-8").json({
+        error: true,
+        status: "disconnected",
+        isConnected: false,
+        qrCode: null,
+        message: err?.message || "Terjadi kesalahan internal pada server API.",
+      });
+    }
+  }
+  next(err);
 });
 
 

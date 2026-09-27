@@ -72,7 +72,7 @@ export class WhatsAppGatewayManager {
     }
   }
 
-  private waitForReadiness(timeoutMs = 15000): Promise<WhatsAppState> {
+  private waitForReadiness(timeoutMs = 9000): Promise<WhatsAppState> {
     // If already in a definitive terminal state, return immediately
     if (this.status === "connected" || (this.status === "qr_ready" && Boolean(this.qrCode))) {
       return Promise.resolve(this.getState());

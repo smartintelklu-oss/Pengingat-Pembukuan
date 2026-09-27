@@ -102,6 +102,7 @@ export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<
     try {
       const res = await fetch(`/api/whatsapp/status?userId=${encodeURIComponent(userId)}`, {
         headers: {
+          'Accept': 'application/json',
           'x-user-id': userId,
         },
       });
@@ -154,6 +155,7 @@ export async function connectWhatsApp(userId: string = 'user-utama', forceFresh:
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
           'x-user-id': userId,
         },
         body: JSON.stringify({ userId, forceFresh: attempt > 0 ? false : forceFresh }),
