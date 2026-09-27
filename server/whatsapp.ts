@@ -45,6 +45,8 @@ export class WhatsAppGatewayManager {
   private lastError: string | null = null;
   private isInitializing: boolean = false;
   private reconnectAttempts: number = 0;
+  private activeInitPromise: Promise<WhatsAppState> | null = null;
+  private readinessResolvers: Array<() => void> = [];
 
   constructor(userId: string = "user-utama") {
     this.userId = sanitizeUserId(userId);
@@ -60,6 +62,48 @@ export class WhatsAppGatewayManager {
     }
   }
 
+  private notifyReadiness() {
+    const listeners = [...this.readinessResolvers];
+    this.readinessResolvers = [];
+    for (const resolve of listeners) {
+      try {
+        resolve();
+      } catch {}
+    }
+  }
+
+  private waitForReadiness(timeoutMs = 15000): Promise<WhatsAppState> {
+    // If already in a definitive terminal state, return immediately
+    if (this.status === "connected" || (this.status === "qr_ready" && Boolean(this.qrCode))) {
+      return Promise.resolve(this.getState());
+    }
+
+    return new Promise<WhatsAppState>((resolve) => {
+      let resolved = false;
+      let timer: NodeJS.Timeout | null = null;
+
+      const onReady = () => {
+        if (resolved) return;
+        resolved = true;
+        if (timer) clearTimeout(timer);
+        resolve(this.getState());
+      };
+
+      timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        // If timed out still without QR or connection, transition out of hanging 'connecting' state
+        if (this.status === "connecting" && !this.qrCode) {
+          this.status = "disconnected";
+          this.lastError = "Batas waktu pembuatan Kode QR terlampaui. Silakan klik 'Perbarui Barcode QR'.";
+        }
+        resolve(this.getState());
+      }, timeoutMs);
+
+      this.readinessResolvers.push(onReady);
+    });
+  }
+
   /**
    * Check if there are existing credentials saved on disk for this user
    */
@@ -73,66 +117,71 @@ export class WhatsAppGatewayManager {
   }
 
   /**
-   * Get current connection status & info for this user
+   * Get current connection status & info for this user (Guaranteed 100% valid JSON serializable)
    */
   public getState(): WhatsAppState {
     return {
       userId: this.userId,
       status: this.status,
       isConnected: this.status === "connected",
-      qrCode: this.qrCode,
-      phoneNumber: this.phoneNumber,
-      pushName: this.pushName,
-      lastConnectedAt: this.lastConnectedAt,
-      lastError: this.lastError,
+      qrCode: this.qrCode || null,
+      phoneNumber: this.phoneNumber || null,
+      pushName: this.pushName || null,
+      lastConnectedAt: this.lastConnectedAt || null,
+      lastError: this.lastError || null,
     };
   }
 
   /**
-   * Initialize or restore WhatsApp connection for this user
+   * Initialize or restore WhatsApp connection for this user.
+   * Ensures the server NEVER returns prematurely before the socket is ready or QR generated.
    */
   public async init(forceFresh: boolean = false): Promise<WhatsAppState> {
-    if (this.isInitializing) {
-      // If already initializing, wait a moment for the pending QR or connect
-      await new Promise<void>((resolve) => {
-        const check = setInterval(() => {
-          if (!this.isInitializing || this.qrCode || this.status === "connected") {
-            clearInterval(check);
-            resolve();
-          }
-        }, 150);
-        setTimeout(() => {
-          clearInterval(check);
-          resolve();
-        }, 8000);
-      });
-      return this.getState();
-    }
-
+    // 1. If already connected with active socket and fresh not requested
     if (this.status === "connected" && this.sock && !forceFresh) {
       return this.getState();
     }
 
+    // 2. If QR is already generated and ready to scan and fresh not requested
     if (this.status === "qr_ready" && this.qrCode && !forceFresh) {
       return this.getState();
     }
 
+    // 3. If an initialization is already running and not forceFresh, share the same active promise
+    if (this.activeInitPromise && !forceFresh) {
+      return this.activeInitPromise;
+    }
+
+    this.activeInitPromise = (async () => {
+      try {
+        return await this.executeInit(forceFresh);
+      } finally {
+        this.activeInitPromise = null;
+      }
+    })();
+
+    return this.activeInitPromise;
+  }
+
+  private async executeInit(forceFresh: boolean): Promise<WhatsAppState> {
     this.isInitializing = true;
     this.status = "connecting";
     this.lastError = null;
     this.reconnectAttempts = 0;
 
     if (forceFresh) {
-      await this.cleanupSessionFiles();
       this.qrCode = null;
+      await this.cleanupSessionFiles();
     }
 
     try {
       const { state, saveCreds } = await useMultiFileAuthState(this.sessionDir);
 
-      // Close previous socket if open
+      // Close previous socket if open and detach old listeners to prevent stale events
       if (this.sock) {
         try {
+          this.sock.ev.removeAllListeners("connection.update");
+          this.sock.ev.removeAllListeners("creds.update");
           this.sock.end(undefined);
         } catch {}
         this.sock = null;
@@ -159,7 +208,7 @@ export class WhatsAppGatewayManager {
         if (qr) {
           try {
             this.qrCode = await QRCode.toDataURL(qr, {
-              width: 320,
+              width: 340,
               margin: 2,
               color: {
                 dark: "#0f172a",
@@ -169,9 +218,11 @@ export class WhatsAppGatewayManager {
             this.status = "qr_ready";
             this.lastError = null;
             console.log(`[WhatsApp:${this.userId}] New QR Code generated successfully`);
+            this.notifyReadiness();
           } catch (qrErr: any) {
             console.error(`[WhatsApp:${this.userId}] Failed to generate QR Code data URL:`, qrErr);
             this.lastError = "Gagal membuat gambar QR Code.";
+            this.notifyReadiness();
           }
         }
 
@@ -187,6 +238,7 @@ export class WhatsAppGatewayManager {
           this.pushName = sock.user?.name || null;
 
           console.log(`[WhatsApp:${this.userId}] Connected successfully! Number: ${this.phoneNumber}, Name: ${this.pushName}`);
+          this.notifyReadiness();
         } else if (connection === "close") {
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
           const isLoggedOut = statusCode === DisconnectReason.loggedOut;
@@ -200,6 +252,7 @@ export class WhatsAppGatewayManager {
             this.pushName = null;
             this.lastError = "Sesi WhatsApp telah keluar. Silakan scan QR ulang.";
             await this.cleanupSessionFiles();
+            this.notifyReadiness();
           } else if (this.hasSavedSession()) {
             // Reconnection attempt for authenticated user
             this.status = "connecting";
@@ -215,6 +268,7 @@ export class WhatsAppGatewayManager {
             } else {
               this.status = "disconnected";
               this.lastError = "Koneksi WhatsApp terputus. Silakan sambungkan ulang.";
+              this.notifyReadiness();
             }
           } else {
             // Unpaired session: QR expired or refreshed by WhatsApp
@@ -226,41 +280,23 @@ export class WhatsAppGatewayManager {
             }, 800);
           }
         } else if (connection === "connecting") {
-          if (!this.qrCode) {
+          if (!this.qrCode && this.status !== "connected") {
             this.status = "connecting";
           }
         }
       });
 
-      // Wait up to 10 seconds for the first QR code to be generated or connection opened
-      await new Promise<void>((resolve) => {
-        let isDone = false;
-        const finish = () => {
-          if (!isDone) {
-            isDone = true;
-            resolve();
-          }
-        };
-
-        const timer = setTimeout(finish, 10000);
-
-        const checkInterval = setInterval(() => {
-          if (this.qrCode || this.status === "connected" || this.lastError) {
-            clearInterval(checkInterval);
-            clearTimeout(timer);
-            finish();
-          }
-        }, 150);
-      });
+      // Wait until socket readiness is reached (QR code ready, connection opened, or timeout)
+      return await this.waitForReadiness(15000);
     } catch (err: any) {
       console.error(`[WhatsApp:${this.userId}] Error initializing socket:`, err);
       this.status = "disconnected";
       this.lastError = err.message || "Gagal menginisialisasi WhatsApp Gateway.";
+      this.notifyReadiness();
+      return this.getState();
     } finally {
       this.isInitializing = false;
     }
-
-    return this.getState();
   }
 
   /**
@@ -269,6 +305,10 @@ export class WhatsAppGatewayManager {
   public async logout(): Promise<void> {
     try {
       if (this.sock) {
+        try {
+          this.sock.ev.removeAllListeners("connection.update");
+          this.sock.ev.removeAllListeners("creds.update");
+        } catch {}
         await this.sock.logout().catch(() => {});
         this.sock.end(undefined);
         this.sock = null;
@@ -280,12 +320,13 @@ export class WhatsAppGatewayManager {
     await this.cleanupSessionFiles();
     this.status = "disconnected";
     this.qrCode = null;
-    this.rawQr = null;
     this.phoneNumber = null;
     this.pushName = null;
     this.lastConnectedAt = null;
     this.lastError = null;
     this.reconnectAttempts = 0;
+    this.activeInitPromise = null;
+    this.notifyReadiness();
   }
 
   /**

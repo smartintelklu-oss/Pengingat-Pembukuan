@@ -17,6 +17,39 @@ export interface WhatsAppState {
   lastError: string | null;
 }
 
+/**
+ * Validates and normalizes server JSON data to guarantee reliable rendering in frontend
+ */
+export function normalizeWhatsAppState(data: any, fallbackUserId: string = 'user-utama'): WhatsAppState {
+  if (!data || typeof data !== 'object') {
+    return {
+      userId: fallbackUserId,
+      status: 'disconnected',
+      isConnected: false,
+      qrCode: null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: 'Data respons server tidak valid.',
+    };
+  }
+
+  const validStatuses: WhatsAppConnectionStatus[] = ['disconnected', 'connecting', 'qr_ready', 'connected'];
+  const status: WhatsAppConnectionStatus = validStatuses.includes(data.status) ? data.status : 'disconnected';
+  const isConnected = Boolean(data.isConnected || status === 'connected');
+
+  return {
+    userId: typeof data.userId === 'string' && data.userId.trim() ? data.userId : fallbackUserId,
+    status,
+    isConnected,
+    qrCode: typeof data.qrCode === 'string' && data.qrCode.startsWith('data:image/') ? data.qrCode : null,
+    phoneNumber: typeof data.phoneNumber === 'string' && data.phoneNumber.trim() ? data.phoneNumber : null,
+    pushName: typeof data.pushName === 'string' && data.pushName.trim() ? data.pushName : null,
+    lastConnectedAt: typeof data.lastConnectedAt === 'string' ? data.lastConnectedAt : null,
+    lastError: typeof data.lastError === 'string' && data.lastError.trim() ? data.lastError : null,
+  };
+}
+
 export interface GatewaySendResult {
   status: boolean;
   message: string;
@@ -36,11 +69,16 @@ export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<
         'x-user-id': userId,
       },
     });
-    if (!res.ok) {
-      throw new Error(`Server returned HTTP ${res.status}`);
+
+    const text = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(text.startsWith('<') ? 'Server backend belum siap (menerima HTML).' : 'Respons server bukan format JSON yang valid.');
     }
-    const data: WhatsAppState = await res.json();
-    return data;
+
+    return normalizeWhatsAppState(data, userId);
   } catch (err: any) {
     return {
       userId,
@@ -56,7 +94,8 @@ export async function getWhatsAppStatus(userId: string = 'user-utama'): Promise<
 }
 
 /**
- * Initializes or starts WhatsApp connection / generates a fresh QR code for a specific user
+ * Initializes or starts WhatsApp connection / generates a fresh QR code for a specific user.
+ * Ensures the response from the server is verified before returning.
  */
 export async function connectWhatsApp(userId: string = 'user-utama', forceFresh: boolean = false): Promise<WhatsAppState> {
   try {
@@ -68,8 +107,16 @@ export async function connectWhatsApp(userId: string = 'user-utama', forceFresh:
       },
       body: JSON.stringify({ userId, forceFresh }),
     });
-    const data: WhatsAppState = await res.json();
-    return data;
+
+    const text = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(text.startsWith('<') ? 'Server backend sedang memulai ulang. Silakan coba beberapa detik lagi.' : 'Respons server bukan format JSON yang valid.');
+    }
+
+    return normalizeWhatsAppState(data, userId);
   } catch (err: any) {
     return {
       userId,

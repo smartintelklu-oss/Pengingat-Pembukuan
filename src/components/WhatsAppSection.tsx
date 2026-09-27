@@ -22,7 +22,12 @@ import {
   RefreshCw,
   Rocket,
   Radio,
-  QrCode
+  QrCode,
+  X,
+  Smartphone,
+  ShieldCheck,
+  LogOut,
+  Loader2
 } from 'lucide-react';
 import { ScheduledWhatsApp, WhatsAppTextType } from '../types';
 import { 
@@ -32,6 +37,9 @@ import {
 } from '../utils/whatsapp';
 import { 
   getWhatsAppStatus,
+  connectWhatsApp,
+  disconnectWhatsApp,
+  normalizeWhatsAppState,
   WhatsAppState 
 } from '../utils/whatsappGateway';
 
@@ -76,6 +84,10 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
     lastConnectedAt: null,
     lastError: null,
   });
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [isLoadingQR, setIsLoadingQR] = useState(false);
+  const [isDisconnectingWA, setIsDisconnectingWA] = useState(false);
+
   const [sendingGatewayId, setSendingGatewayId] = useState<string | null>(null);
   const [gatewayFeedback, setGatewayFeedback] = useState<{
     id: string;
@@ -86,17 +98,68 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
   const fetchStatus = async () => {
     try {
       const state = await getWhatsAppStatus(userId);
-      setWaState(state);
-    } catch (err) {
+      setWaState(normalizeWhatsAppState(state, userId));
+    } catch {
       // ignore
     }
   };
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 4000);
+    // Faster polling when waiting for scan or connecting
+    const pollIntervalMs = isQRModalOpen || waState.status === 'qr_ready' || waState.status === 'connecting' ? 2500 : 5000;
+    const interval = setInterval(fetchStatus, pollIntervalMs);
     return () => clearInterval(interval);
-  }, [userId]);
+  }, [userId, isQRModalOpen, waState.status]);
+
+  const handleOpenQRModal = async () => {
+    setIsQRModalOpen(true);
+    // If not connected and no QR is displayed yet, trigger connection
+    if (!waState.isConnected && !waState.qrCode) {
+      setIsLoadingQR(true);
+      try {
+        const state = await connectWhatsApp(userId, false);
+        setWaState(normalizeWhatsAppState(state, userId));
+      } catch (err: any) {
+        setWaState(prev => ({
+          ...prev,
+          lastError: err?.message || 'Gagal memulai inisialisasi socket WhatsApp.',
+        }));
+      } finally {
+        setIsLoadingQR(false);
+      }
+    }
+  };
+
+  const handleRefreshQR = async () => {
+    setIsLoadingQR(true);
+    try {
+      const state = await connectWhatsApp(userId, true);
+      setWaState(normalizeWhatsAppState(state, userId));
+    } catch (err: any) {
+      setWaState(prev => ({
+        ...prev,
+        lastError: err?.message || 'Gagal memperbarui barcode QR.',
+      }));
+    } finally {
+      setIsLoadingQR(false);
+    }
+  };
+
+  const handleDisconnectWA = async () => {
+    if (!window.confirm(`Apakah Anda yakin ingin memutuskan sambungan WhatsApp untuk akun "${userName}"?`)) {
+      return;
+    }
+    setIsDisconnectingWA(true);
+    try {
+      await disconnectWhatsApp(userId);
+      await fetchStatus();
+    } catch (err: any) {
+      alert('Gagal memutuskan sambungan: ' + err.message);
+    } finally {
+      setIsDisconnectingWA(false);
+    }
+  };
 
   // Statistics calculation
   const totalCount = items.length;
@@ -208,8 +271,8 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
             {/* Gateway status chip */}
             <button
               type="button"
-              onClick={onOpenSettings}
-              title={`Klik untuk membuka pengaturan WhatsApp akun ${userName}`}
+              onClick={handleOpenQRModal}
+              title={`Klik untuk membuka kode QR dan pengaturan WhatsApp akun ${userName}`}
               className={`px-3 py-1 rounded-full text-2xs font-bold border inline-flex items-center space-x-1.5 transition-all cursor-pointer ${
                 waState.isConnected 
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' 
@@ -233,6 +296,16 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {/* Direct WhatsApp QR Button in Header */}
+          <button
+            type="button"
+            onClick={handleOpenQRModal}
+            className="inline-flex items-center justify-center space-x-2 px-4 py-3 rounded-2xl bg-white border border-slate-200 hover:border-emerald-500/50 hover:bg-emerald-50/30 text-slate-700 hover:text-emerald-700 text-xs sm:text-sm font-bold shadow-2xs transition-all cursor-pointer"
+          >
+            <QrCode className="w-4 h-4 text-emerald-600" />
+            <span>{waState.isConnected ? 'Status WhatsApp' : 'Tampilkan Kode QR'}</span>
+          </button>
+
           {/* Add Scheduled WhatsApp Button */}
           <button
             id="btn-add-scheduled-wa"
@@ -291,12 +364,237 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
           </div>
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={handleOpenQRModal}
             className="inline-flex items-center justify-center space-x-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-sm shadow-emerald-600/20 shrink-0 cursor-pointer"
           >
             <QrCode className="w-4 h-4" />
             <span>Tampilkan Kode QR WhatsApp</span>
           </button>
+        </div>
+      )}
+
+      {/* Dedicated Interactive WhatsApp QR Modal */}
+      {isQRModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    Otorisasi WhatsApp Akun {userName}
+                  </h3>
+                  <p className="text-2xs text-slate-500">
+                    Koneksi Langsung Baileys Multi-Device (Mandiri)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsQRModalOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-5">
+              {/* State 1: Connected */}
+              {waState.isConnected ? (
+                <div className="text-center py-6 space-y-4">
+                  <div className="w-16 h-16 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shadow-inner">
+                    <CheckCircle2 className="w-10 h-10" />
+                  </div>
+                  <div>
+                    <h4 className="text-lg font-black text-slate-900">
+                      WhatsApp Berhasil Terhubung!
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+                      Perangkat WhatsApp Anda siap mengirim pesan terjadwal otomatis secara real-time.
+                    </p>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 text-left space-y-2 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">Nomor WhatsApp:</span>
+                      <span className="font-mono font-bold text-slate-900">+{waState.phoneNumber || 'Terdaftar'}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">Nama Profil:</span>
+                      <span className="font-bold text-slate-900">{waState.pushName || userName}</span>
+                    </div>
+                    {waState.lastConnectedAt && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500">Waktu Terhubung:</span>
+                        <span className="text-slate-700">{new Date(waState.lastConnectedAt).toLocaleTimeString('id-ID')}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={isDisconnectingWA}
+                      onClick={handleDisconnectWA}
+                      className="flex-1 py-2.5 px-4 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isDisconnectingWA ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Memutuskan...</span>
+                        </>
+                      ) : (
+                        <>
+                          <LogOut className="w-4 h-4" />
+                          <span>Putuskan Sambungan</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsQRModalOpen(false)}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Selesai
+                    </button>
+                  </div>
+                </div>
+              ) : isLoadingQR || (waState.status === 'connecting' && !waState.qrCode) ? (
+                /* State 2: Loading Socket & Generating QR (No premature render) */
+                <div className="text-center py-10 space-y-4">
+                  <div className="relative w-16 h-16 mx-auto">
+                    <div className="absolute inset-0 rounded-2xl bg-emerald-500/20 animate-ping" />
+                    <div className="relative w-16 h-16 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shadow-sm">
+                      <Loader2 className="w-8 h-8 animate-spin" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-black text-slate-900">
+                      Menyiapkan Socket WhatsApp...
+                    </h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      Sedang membuka sambungan socket dan menunggu barcode otorisasi resmi. Server tidak akan mengembalikan respons sebelum kode siap.
+                    </p>
+                  </div>
+                  <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-2xs font-semibold">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Inisialisasi handshake socket...</span>
+                  </div>
+                </div>
+              ) : waState.status === 'qr_ready' && waState.qrCode ? (
+                /* State 3: QR Ready to Scan */
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-2xs font-bold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                      <span>Siap Discan dari WhatsApp HP</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={isLoadingQR}
+                      onClick={handleRefreshQR}
+                      className="inline-flex items-center space-x-1 text-2xs font-bold text-slate-600 hover:text-emerald-600 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingQR ? 'animate-spin' : ''}`} />
+                      <span>Perbarui Barcode</span>
+                    </button>
+                  </div>
+
+                  {/* QR Image Container */}
+                  <div className="p-4 bg-slate-50 border-2 border-emerald-500/20 rounded-3xl flex flex-col items-center justify-center shadow-inner">
+                    <img 
+                      src={waState.qrCode} 
+                      alt="WhatsApp Auth Barcode" 
+                      className="w-56 h-56 sm:w-64 sm:h-64 rounded-2xl bg-white p-2 shadow-sm object-contain"
+                    />
+                    <p className="text-3xs text-slate-400 mt-2 font-mono">
+                      Barcode otomatis diperbarui jika kadaluarsa
+                    </p>
+                  </div>
+
+                  {/* 4 Steps Guide */}
+                  <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-200/60 space-y-2">
+                    <p className="text-2xs font-black text-emerald-900 uppercase tracking-wider flex items-center space-x-1.5">
+                      <Smartphone className="w-3.5 h-3.5" />
+                      <span>Cara Memindai dari WhatsApp HP:</span>
+                    </p>
+                    <ol className="text-2xs text-emerald-800/90 space-y-1 pl-4 list-decimal">
+                      <li>Buka aplikasi WhatsApp di HP Anda.</li>
+                      <li>Ketuk ikon titik tiga (Android) atau menu <b>Setelan / Settings</b> (iPhone).</li>
+                      <li>Pilih menu <b>Perangkat Tertaut</b> lalu ketuk <b>Tautkan Perangkat</b>.</li>
+                      <li>Arahkan kamera HP Anda ke barcode di atas untuk menghubungkan.</li>
+                    </ol>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isLoadingQR}
+                      onClick={handleRefreshQR}
+                      className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingQR ? 'animate-spin' : ''}`} />
+                      <span>Muat Ulang Barcode</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsQRModalOpen(false)}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Tutup
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* State 4: Disconnected or Error */
+                <div className="text-center py-6 space-y-4">
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shadow-sm">
+                    <QrCode className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-900">
+                      Sambungkan WhatsApp Akun {userName}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                      Klik tombol di bawah untuk membuat barcode QR baru dan menghubungkan WhatsApp Anda secara langsung.
+                    </p>
+                  </div>
+
+                  {waState.lastError && (
+                    <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs text-left flex items-start space-x-2">
+                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{waState.lastError}</span>
+                    </div>
+                  )}
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      disabled={isLoadingQR}
+                      onClick={handleRefreshQR}
+                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {isLoadingQR ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Menghubungkan Socket...</span>
+                        </>
+                      ) : (
+                        <>
+                          <QrCode className="w-4 h-4" />
+                          <span>Buat & Tampilkan Barcode QR</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

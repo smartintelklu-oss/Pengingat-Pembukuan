@@ -154,11 +154,31 @@ Berikan output dalam format JSON valid dengan struktur:
 });
 
 // API: Self-Hosted WhatsApp Gateway (Multi-Device & Multi-Session per Owner Account)
+// Enforce valid JSON and disable caching on all /api/whatsapp routes
+app.use("/api/whatsapp", (req, res, next) => {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  next();
+});
+
 // 1. Get current WhatsApp connection status, QR code, and linked profile for a specific user
 app.get("/api/whatsapp/status", (req, res) => {
-  const userId = (req.query.userId as string) || (req.headers["x-user-id"] as string) || "user-utama";
-  const manager = getWhatsAppManager(userId);
-  res.json(manager.getState());
+  try {
+    const userId = (req.query.userId as string) || (req.headers["x-user-id"] as string) || "user-utama";
+    const manager = getWhatsAppManager(userId);
+    res.json(manager.getState());
+  } catch (error: any) {
+    res.status(500).json({
+      userId: "user-utama",
+      status: "disconnected",
+      isConnected: false,
+      qrCode: null,
+      phoneNumber: null,
+      pushName: null,
+      lastConnectedAt: null,
+      lastError: error.message || "Gagal mengambil status WhatsApp.",
+    });
+  }
 });
 
 // 2. Start connection or generate a new QR code for scanning for this user
