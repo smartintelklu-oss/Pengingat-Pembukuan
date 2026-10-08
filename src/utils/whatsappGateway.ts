@@ -35,14 +35,16 @@ export function normalizeWhatsAppState(data: any, fallbackUserId: string = 'user
   }
 
   const validStatuses: WhatsAppConnectionStatus[] = ['disconnected', 'connecting', 'qr_ready', 'connected'];
-  const status: WhatsAppConnectionStatus = validStatuses.includes(data.status) ? data.status : 'disconnected';
-  const isConnected = Boolean(data.isConnected || status === 'connected');
+  const rawStatus: WhatsAppConnectionStatus = validStatuses.includes(data.status) ? data.status : 'disconnected';
+  const isConnected = Boolean(data.isConnected || rawStatus === 'connected');
+  const qrCode = typeof data.qrCode === 'string' && data.qrCode.startsWith('data:image/') ? data.qrCode : null;
+  const status: WhatsAppConnectionStatus = isConnected ? 'connected' : (qrCode ? 'qr_ready' : rawStatus);
 
   return {
     userId: typeof data.userId === 'string' && data.userId.trim() ? data.userId : fallbackUserId,
     status,
     isConnected,
-    qrCode: typeof data.qrCode === 'string' && data.qrCode.startsWith('data:image/') ? data.qrCode : null,
+    qrCode,
     phoneNumber: typeof data.phoneNumber === 'string' && data.phoneNumber.trim() ? data.phoneNumber : null,
     pushName: typeof data.pushName === 'string' && data.pushName.trim() ? data.pushName : null,
     lastConnectedAt: typeof data.lastConnectedAt === 'string' ? data.lastConnectedAt : null,

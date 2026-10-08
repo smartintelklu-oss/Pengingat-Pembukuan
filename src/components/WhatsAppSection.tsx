@@ -615,7 +615,7 @@ export const WhatsAppSection: React.FC<WhatsAppSectionProps> = ({
             <p className="text-xs opacity-80">
               {gatewayFeedback.success 
                 ? 'Status pesan telah diperbarui secara otomatis.' 
-                : 'Periksa kembali API Key dan status perangkat di akun penyedia gateway Anda.'}
+                : 'Pastikan WhatsApp akun Anda sudah tertaut aktif melalui Scan QR di tab Pengaturan dan ponsel terhubung internet.'}
             </p>
           </div>
         </div>

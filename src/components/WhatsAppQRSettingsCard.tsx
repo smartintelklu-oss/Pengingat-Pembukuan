@@ -541,23 +541,36 @@ export const WhatsAppQRSettingsCard: React.FC<WhatsAppQRSettingsCardProps> = ({
               </button>
             </div>
 
-            {/* Advantages Checklist */}
-            <div className="pt-4 border-t border-slate-100 max-w-lg mx-auto grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-              <div className="flex items-center space-x-2 text-2xs text-slate-600">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Nomor WhatsApp Pribadi / Akun Tersendiri</span>
+            {/* Advantages Checklist & Info Note */}
+            <div className="pt-4 border-t border-slate-100 max-w-lg mx-auto space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
+                <div className="flex items-center space-x-2 text-2xs text-slate-600">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Nomor WhatsApp Pribadi / Akun Tersendiri</span>
+                </div>
+                <div className="flex items-center space-x-2 text-2xs text-slate-600">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Otomatis &amp; Terjadwal Mandiri</span>
+                </div>
+                <div className="flex items-center space-x-2 text-2xs text-slate-600">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Bebas Biaya API Pihak Ketiga</span>
+                </div>
+                <div className="flex items-center space-x-2 text-2xs text-slate-600">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>Multi-Device Resmi &amp; Aman</span>
+                </div>
               </div>
-              <div className="flex items-center space-x-2 text-2xs text-slate-600">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Otomatis &amp; Terjadwal Mandiri</span>
-              </div>
-              <div className="flex items-center space-x-2 text-2xs text-slate-600">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Bebas Biaya API Pihak Ketiga</span>
-              </div>
-              <div className="flex items-center space-x-2 text-2xs text-slate-600">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Multi-Device Resmi &amp; Aman</span>
+
+              {/* Informational Callout regarding API Token */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/80 border border-amber-200/80 text-amber-900 text-2xs text-left space-y-1">
+                <div className="flex items-center space-x-1.5 font-bold text-amber-950">
+                  <BadgeCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Tidak Memerlukan API Token / API Key</span>
+                </div>
+                <p className="text-amber-800/90 leading-relaxed">
+                  Aplikasi ini menggunakan teknologi <strong>Gateway Mandiri (Scan QR WhatsApp Multi-Device)</strong>. Anda tidak perlu mendaftar atau memasukkan Token API pihak ketiga berbayar (seperti Fonnte/Wablas). Cukup klik tombol hijau di atas dan pindai Kode QR langsung dari HP Anda.
+                </p>
               </div>
             </div>
           </div>
